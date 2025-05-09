@@ -1,66 +1,147 @@
-from PIL import Image, ImageTk
 import tkinter as tk
+from tkinter import filedialog
+from PIL import Image, ImageTk
 import numpy as np
 import sys
+import os
+import time 
 
-if len(sys.argv) < 2:
-    exit(f"Usage: {sys.argv[0]} <video_WxH.yuv>")
-
-FILENAME_YUV = sys.argv[1]
-WIDTH, HEIGHT = FILENAME_YUV.split('.', 1)[0].split("_")[-1].split('x')
-WIDTH = int(WIDTH)
-HEIGHT = int(HEIGHT)
-FRAME_SIZE = WIDTH * HEIGHT * 3 // 2  # YUV420p
 FPS = 24
+ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 
-frames = []
-frame_index = 0
-with open(FILENAME_YUV, 'rb') as f:
-    def read_yuv_frame():
-        data = f.read(FRAME_SIZE)
-        if len(data) < FRAME_SIZE:
-            return None
+class Player:
+    def __init__(self, root, filename=None):
+        self.root = root
+        self.filename = filename
+        self.frames = []
+        self.frame_index = 0
+        self.width = 0
+        self.height = 0
+        self.video_id = 0
+        self.stop_update_loop = False
+        self.video_is_playing = False
 
-        y = np.frombuffer(data[0:WIDTH*HEIGHT], dtype=np.uint8).reshape((HEIGHT, WIDTH))
-        u = np.frombuffer(data[WIDTH*HEIGHT:WIDTH*HEIGHT + (WIDTH//2)*(HEIGHT//2)], dtype=np.uint8).reshape((HEIGHT//2, WIDTH//2))
-        v = np.frombuffer(data[WIDTH*HEIGHT + (WIDTH//2)*(HEIGHT//2):], dtype=np.uint8).reshape((HEIGHT//2, WIDTH//2))
+        self.root.geometry('600x600')
+        self.root.title("BildKomp")
 
-        # Upsampling U und V
-        u_up = u.repeat(2, axis=0).repeat(2, axis=1)
-        v_up = v.repeat(2, axis=0).repeat(2, axis=1)
+        self.build_gui()
 
-        # YUV → RGB
-        yuv = np.stack((y, u_up, v_up), axis=2).astype(np.float32)
-        yuv[:, :, 0] = yuv[:, :, 0] - 16
-        yuv[:, :, 1] = yuv[:, :, 1] - 128
-        yuv[:, :, 2] = yuv[:, :, 2] - 128
+        if filename:
+            self.load_yuv_file(filename)
 
-        m = np.array([[1.0,  0.0,       1.402],
-                    [1.0, -0.34414, -0.71414],
-                    [1.0,  1.772,    0.0]])
-        rgb = yuv @ m.T
-        rgb = np.clip(rgb, 0, 255).astype(np.uint8)
-        return Image.fromarray(rgb, 'RGB')
+    def build_gui(self):
+        top_frame = tk.Frame(self.root)
+        top_frame.pack(side="top", fill='x')
 
-    while frame := read_yuv_frame():
-        frames.append(frame)
+        file_menu_btn = tk.Menubutton(top_frame, text="File", relief=tk.RAISED)
+        file_menu = tk.Menu(file_menu_btn, tearoff=0)
+        file_menu.add_command(label="Load", command=self.menu_load_file)
+        file_menu.add_command(label="Save as ...", command=self.menu_save_file)
+        file_menu_btn.config(menu=file_menu)
+        file_menu_btn.pack(side="left", padx=0, pady=5)
 
-# GUI Setup
-root = tk.Tk()
-root.title(f"BildKomp - {FILENAME_YUV}")
-label = tk.Label(root)
-label.pack()
+        option_menu_btn = tk.Menubutton(top_frame, text="Option", relief=tk.RAISED)
+        option_menu = tk.Menu(option_menu_btn, tearoff=0)
+        option_menu.add_command(label="Quantisation", command=lambda: print("Option 1"))
+        option_menu.add_command(label="Placeholder", command=lambda: print("Option 2"))
+        option_menu_btn.config(menu=option_menu)
+        option_menu_btn.pack(side="left", padx=0, pady=5)
 
-def update_frame():
-    global frame_index
+        main_frame = tk.Frame(self.root)
+        main_frame.pack(fill="both", expand=True)
 
-    root.title(f"[{frame_index}/{len(frames)}] BildKomp - {FILENAME_YUV}")
+        left_frame = tk.Frame(main_frame)
+        left_frame.pack(side="left", fill="both", expand=True)
+        self.image_player = tk.Label(left_frame)
+        self.image_player.pack()
 
-    img = ImageTk.PhotoImage(frames[frame_index])
-    label.config(image=img)
-    label.image = img
-    frame_index = (frame_index + 1) % len(frames)
-    root.after(1000 // FPS, update_frame)
+        right_frame = tk.Frame(main_frame, width=200)
+        right_frame.pack(side="right", fill="y")
+        tk.Label(right_frame, text="Info-Bereich\n(in Entwicklung)", anchor="center").pack(pady=20)
 
-update_frame()
-root.mainloop()
+    def menu_load_file(self):
+        path = filedialog.askopenfilename(initialdir=ROOT_DIR, filetypes=[("YUV files", "*.yuv")])
+        if path:
+            self.load_yuv_file(path)
+
+    def load_yuv_file(self, path):
+        if not os.path.isfile(path):
+            print(f"File not found: {path}")
+            return
+
+        self.video_id += 1
+        #self.stop_update_loop = True
+        #current_id = self.video_id
+
+        # Placeholder anzeigen
+        self.image_player.config(image='', text='Loading Video...', font=("Arial", 20), compound='center')
+        self.image_player.image = None
+        self.root.update()
+
+        try:
+            dims = path.split('.', 1)[0].split("_")[-1].split('x')
+            self.width, self.height = int(dims[0]), int(dims[1])
+        except Exception as e:
+            print(f"Error parsing resolution from filename: {e}")
+            return
+
+        self.frames = self.load_yuv_frames(path)
+        self.frame_index = 0
+        self.filename = path
+        self.root.title(f"BildKomp - {os.path.basename(path)}")
+        
+        self.update_frame()
+
+    def load_yuv_frames(self, path):
+        frames = []
+        frame_size = self.width * self.height * 3 // 2  # YUV420p
+
+        with open(path, 'rb') as f:
+            while True:
+                data = f.read(frame_size)
+                if len(data) < frame_size:
+                    break
+
+                y = np.frombuffer(data[0:self.width * self.height], dtype=np.uint8).reshape((self.height, self.width))
+                u = np.frombuffer(data[self.width * self.height:self.width * self.height + (self.width // 2) * (self.height // 2)],
+                                  dtype=np.uint8).reshape((self.height // 2, self.width // 2))
+                v = np.frombuffer(data[self.width * self.height + (self.width // 2) * (self.height // 2):],
+                                  dtype=np.uint8).reshape((self.height // 2, self.width // 2))
+
+                u_up = u.repeat(2, axis=0).repeat(2, axis=1)
+                v_up = v.repeat(2, axis=0).repeat(2, axis=1)
+
+                yuv = np.stack((y, u_up, v_up), axis=2).astype(np.float32)
+                yuv[:, :, 0] -= 16
+                yuv[:, :, 1] -= 128
+                yuv[:, :, 2] -= 128
+
+                m = np.array([[1.0, 0.0, 1.402],
+                              [1.0, -0.34414, -0.71414],
+                              [1.0, 1.772, 0.0]])
+                rgb = yuv @ m.T
+                rgb = np.clip(rgb, 0, 255).astype(np.uint8)
+                frames.append(Image.fromarray(rgb, 'RGB'))
+
+        return frames
+
+    def update_frame(self):
+        if not self.frames:
+            return
+
+        self.root.title(f"[{self.frame_index}/{len(self.frames)}] BildKomp - {os.path.basename(self.filename)}")
+
+        img = ImageTk.PhotoImage(self.frames[self.frame_index])
+        self.image_player.config(image=img, text='', compound=None)
+        self.image_player.image = img
+        self.frame_index = (self.frame_index + 1) % len(self.frames)
+        self.root.after(1000 // FPS, self.update_frame)
+
+    def menu_save_file(self):
+        pass
+
+if __name__ == "__main__":
+    filename_arg = sys.argv[1] if len(sys.argv) >= 2 else None
+    root = tk.Tk()
+    app = Player(root, filename_arg)
+    root.mainloop()
