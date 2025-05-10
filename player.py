@@ -4,10 +4,12 @@ from PIL import Image, ImageTk
 import numpy as np
 import sys
 import os
-import time 
+import time
+from pipeline.stages.decorrelation.decorrelation_stage import DecorrelationStage
 
 FPS = 24
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
+
 
 class Player:
     def __init__(self, root, filename=None):
@@ -21,7 +23,7 @@ class Player:
         self.stop_update_loop = False
         self.video_is_playing = False
 
-        self.root.geometry('600x600')
+        self.root.geometry("600x600")
         self.root.title("BildKomp")
 
         self.build_gui()
@@ -31,7 +33,7 @@ class Player:
 
     def build_gui(self):
         top_frame = tk.Frame(self.root)
-        top_frame.pack(side="top", fill='x')
+        top_frame.pack(side="top", fill="x")
 
         file_menu_btn = tk.Menubutton(top_frame, text="File", relief=tk.RAISED)
         file_menu = tk.Menu(file_menu_btn, tearoff=0)
@@ -57,10 +59,14 @@ class Player:
 
         right_frame = tk.Frame(main_frame, width=200)
         right_frame.pack(side="right", fill="y")
-        tk.Label(right_frame, text="Info-Bereich\n(in Entwicklung)", anchor="center").pack(pady=20)
+        tk.Label(
+            right_frame, text="Info-Bereich\n(in Entwicklung)", anchor="center"
+        ).pack(pady=20)
 
     def menu_load_file(self):
-        path = filedialog.askopenfilename(initialdir=ROOT_DIR, filetypes=[("YUV files", "*.yuv")])
+        path = filedialog.askopenfilename(
+            initialdir=ROOT_DIR, filetypes=[("YUV files", "*.yuv")]
+        )
         if path:
             self.load_yuv_file(path)
 
@@ -70,16 +76,18 @@ class Player:
             return
 
         self.video_id += 1
-        #self.stop_update_loop = True
-        #current_id = self.video_id
+        # self.stop_update_loop = True
+        # current_id = self.video_id
 
         # Placeholder anzeigen
-        self.image_player.config(image='', text='Loading Video...', font=("Arial", 20), compound='center')
+        self.image_player.config(
+            image="", text="Loading Video...", font=("Arial", 20), compound="center"
+        )
         self.image_player.image = None
         self.root.update()
 
         try:
-            dims = path.split('.', 1)[0].split("_")[-1].split('x')
+            dims = path.split(".", 1)[0].split("_")[-1].split("x")
             self.width, self.height = int(dims[0]), int(dims[1])
         except Exception as e:
             print(f"Error parsing resolution from filename: {e}")
@@ -89,39 +97,25 @@ class Player:
         self.frame_index = 0
         self.filename = path
         self.root.title(f"BildKomp - {os.path.basename(path)}")
-        
+
         self.update_frame()
 
     def load_yuv_frames(self, path):
         frames = []
         frame_size = self.width * self.height * 3 // 2  # YUV420p
 
-        with open(path, 'rb') as f:
+        with open(path, "rb") as f:
             while True:
                 data = f.read(frame_size)
                 if len(data) < frame_size:
                     break
 
-                y = np.frombuffer(data[0:self.width * self.height], dtype=np.uint8).reshape((self.height, self.width))
-                u = np.frombuffer(data[self.width * self.height:self.width * self.height + (self.width // 2) * (self.height // 2)],
-                                  dtype=np.uint8).reshape((self.height // 2, self.width // 2))
-                v = np.frombuffer(data[self.width * self.height + (self.width // 2) * (self.height // 2):],
-                                  dtype=np.uint8).reshape((self.height // 2, self.width // 2))
-
-                u_up = u.repeat(2, axis=0).repeat(2, axis=1)
-                v_up = v.repeat(2, axis=0).repeat(2, axis=1)
-
-                yuv = np.stack((y, u_up, v_up), axis=2).astype(np.float32)
-                yuv[:, :, 0] -= 16
-                yuv[:, :, 1] -= 128
-                yuv[:, :, 2] -= 128
-
-                m = np.array([[1.0, 0.0, 1.402],
-                              [1.0, -0.34414, -0.71414],
-                              [1.0, 1.772, 0.0]])
-                rgb = yuv @ m.T
-                rgb = np.clip(rgb, 0, 255).astype(np.uint8)
-                frames.append(Image.fromarray(rgb, 'RGB'))
+                # Call separate_yuv from DecorrelationStage
+                components = DecorrelationStage.separate_yuv(
+                    data, self.width, self.height
+                )
+                rgb = components["rgb"]
+                frames.append(Image.fromarray(rgb, "RGB"))
 
         return frames
 
@@ -129,16 +123,19 @@ class Player:
         if not self.frames:
             return
 
-        self.root.title(f"[{self.frame_index}/{len(self.frames)}] BildKomp - {os.path.basename(self.filename)}")
+        self.root.title(
+            f"[{self.frame_index}/{len(self.frames)}] BildKomp - {os.path.basename(self.filename)}"
+        )
 
         img = ImageTk.PhotoImage(self.frames[self.frame_index])
-        self.image_player.config(image=img, text='', compound=None)
+        self.image_player.config(image=img, text="", compound=None)
         self.image_player.image = img
         self.frame_index = (self.frame_index + 1) % len(self.frames)
         self.root.after(1000 // FPS, self.update_frame)
 
     def menu_save_file(self):
         pass
+
 
 if __name__ == "__main__":
     filename_arg = sys.argv[1] if len(sys.argv) >= 2 else None
