@@ -1,7 +1,13 @@
 import unittest
 import numpy as np
 
+from pipeline.stages.decorrelation.strategy.prediction_strategy import (
+    PredictionStrategy as ps,
+)
 from pipeline.stages.decorrelation.decorrelation_stage import DecorrelationStage as ds
+from pipeline.stages.decorrelation.strategy.decode_prediction_strategy import (
+    DecodePredictionStrategy as dps,
+)
 
 
 class TestDecorrelationStage(unittest.TestCase):
@@ -34,6 +40,127 @@ class TestDecorrelationStage(unittest.TestCase):
 
         # Validate RGB values are within range
         self.assertTrue(np.all(video["rgb"] >= 0) and np.all(video["rgb"] <= 255))
+
+    def test_first_frame_prediction(self):
+        """
+        Test the prediction strategy for the first frame of the input video.
+        Prints the best modes for each block in the frame.
+        """
+        # Calculate frame size for YUV420p
+        frame_size = self.input_width * self.input_height * 3 // 2
+
+        # Extract the first frame from the input data
+        first_frame = self.input_data[:frame_size]
+
+        # Initialize the prediction strategy
+        prediction_strategy = ps()
+
+        # Call separate_yuv with the first frame
+        video = ds.separate_yuv(first_frame, self.input_width, self.input_height)
+
+        # Call the prediction strategy process method
+        result = prediction_strategy.process(
+            {"y": video["y"], "u": video["u"], "v": video["v"]}, block_size=8
+        )
+
+        # Print the best modes for each block
+        # for component in ["y", "u", "v"]:
+        #     mode_flags = result[f"{component}_mode_flags"]
+        #     print(f"Best modes for {component.upper()} component:")
+        #     print(mode_flags)
+
+    def test_prediction_strategy(self):
+        """
+        Test the prediction strategy by processing all frames in the input video.
+        Validates the residuals and mode flags for each block in each frame.
+        """
+        # Calculate frame size for YUV420p
+        frame_size = self.input_width * self.input_height * 3 // 2
+
+        # Initialize the prediction strategy
+        prediction_strategy = ps()
+
+        # Iterate over all frames in the input data
+        num_frames = len(self.input_data) // frame_size
+        for frame_idx in range(num_frames):
+            # Extract the current frame from the input data
+            start = frame_idx * frame_size
+            end = start + frame_size
+            frame_data = self.input_data[start:end]
+
+            # Call separate_yuv with the current frame
+            video = ds.separate_yuv(frame_data, self.input_width, self.input_height)
+
+            # Call the prediction strategy process method
+            result = prediction_strategy.process(
+                {"y": video["y"], "u": video["u"], "v": video["v"]}, block_size=8
+            )
+
+            # Validate the result structure
+            self.assertIn("y_residual", result)
+            self.assertIn("u_residual", result)
+            self.assertIn("v_residual", result)
+            self.assertIn("y_mode_flags", result)
+            self.assertIn("u_mode_flags", result)
+            self.assertIn("v_mode_flags", result)
+
+            # Validate residuals and mode flags for each block
+            for component in ["y", "u", "v"]:
+                residuals = result[f"{component}_residual"]
+                mode_flags = result[f"{component}_mode_flags"]
+
+                # Check that residuals have the same shape as the original component
+                self.assertEqual(residuals.shape, video[component].shape)
+
+                # Check that mode flags have the correct shape for blocks
+                block_height = self.input_height // 8
+                block_width = self.input_width // 8
+                self.assertEqual(mode_flags.shape, (block_height, block_width))
+
+            # print(f"Frame {frame_idx + 1}/{num_frames} processed successfully.")
+
+    def test_encode_decode_first_frame(self):
+        """
+        Test encoding and decoding of the first frame to ensure the decoded frame matches the original.
+        """
+        # Calculate frame size for YUV420p
+        frame_size = self.input_width * self.input_height * 3 // 2
+
+        # Extract the first frame from the input data
+        first_frame = self.input_data[:frame_size]
+
+        # Initialize the prediction and decode strategies
+        prediction_strategy = ps()
+        decode_strategy = dps()
+
+        # Call separate_yuv with the first frame
+        video = ds.separate_yuv(first_frame, self.input_width, self.input_height)
+
+        # Encode the frame using the prediction strategy
+        result = prediction_strategy.process(
+            {"y": video["y"], "u": video["u"], "v": video["v"]}, block_size=8
+        )
+
+        # Decode the frame using the decode strategy
+        decoded_y = decode_strategy.decode(
+            result["y_residual"], result["y_mode_flags"], block_size=8
+        )
+        decoded_u = decode_strategy.decode(
+            result["u_residual"], result["u_mode_flags"], block_size=8
+        )
+        decoded_v = decode_strategy.decode(
+            result["v_residual"], result["v_mode_flags"], block_size=8
+        )
+
+        # Verify that the decoded components match the original components
+        np.testing.assert_array_equal(decoded_y, video["y"])
+        np.testing.assert_array_equal(decoded_u, video["u"])
+        np.testing.assert_array_equal(decoded_v, video["v"])
+
+        # Verify that the decoded values are within the valid range
+        self.assertTrue(np.all(decoded_y >= 0) and np.all(decoded_y <= 255))
+        self.assertTrue(np.all(decoded_u >= 0) and np.all(decoded_u <= 255))
+        self.assertTrue(np.all(decoded_v >= 0) and np.all(decoded_v <= 255))
 
 
 if __name__ == "__main__":

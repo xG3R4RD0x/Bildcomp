@@ -1,6 +1,9 @@
 from typing import Any, Dict
 from pipeline.interfaces.base_stage import CompressionStage
 import numpy as np
+from pipeline.stages.decorrelation.strategy.prediction_strategy import (
+    PredictionStrategy as ps,
+)
 
 # from .strategy.prediction_strategy import PredictionStrategy
 # from .strategy.transformation_strategy import TransformationStrategy
@@ -8,13 +11,8 @@ import numpy as np
 
 
 class DecorrelationStage(CompressionStage):
-    # def __init__(
-    #     self,
-    #     # prediction_strategy: PredictionStrategy,
-    #     # transformation_strategy: TransformationStrategy,
-    # ):
-    # self.prediction_strategy = prediction_strategy
-    # self.transformation_strategy = transformation_strategy
+    def __init__(self):
+        self.prediction_strategy = ps()
 
     def name(self) -> str:
         return "Decorrelation Stage"
@@ -25,7 +23,8 @@ class DecorrelationStage(CompressionStage):
         first we use prediction
         then we use transformation
         """
-        # predicted_data = self.prediction_strategy.process(data)
+
+        predicted_data = self.prediction_strategy.process(data)
 
         # transformed_data = self.transformation_strategy.process(predicted_data)
 

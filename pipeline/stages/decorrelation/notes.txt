@@ -1,0 +1,15 @@
+Qué pasa aquí?
+1.hacemos la separación de y,u,v + rgb
+-hacemos esto para poder trabajar con los canales y,u,b y hacer decorrelacion en cada uno
+-el rgb es una transformacion de estos para poder mostrarlo en el player
+2.En la predicción
+-hacemos una predicción de 3 modos (vertical, horizontal y promedio)
+-usamos 3 modos porque es medio rapido y no tan complejo
+-a cada frame se lo separa en bloques (default 8)
+-calculamos un padding para transformar el tamaño del frame(esto es para el caso en el que el tamaño del frame no sea divisible para el tamaño del bloque y as¿i no dejar pixeles sobrantes)
+-los pixeles extra con el padding los inicializamos con 0
+-luego cortamos el frame al tamaño original y esto no afecta a la decodificacion
+-en cada bloque se evalua cual modo da menor error (error es original - predicción)
+-el que modo que tiene menor error se guarda y se lo pasa como resultado
+//Lo paso en binario para poder pasarlo como matriz y no como string
+// es necesario pasarlo y guardarlo en el header porque se necesita para decodificar
