@@ -8,6 +8,7 @@ from pipeline.stages.decorrelation.decorrelation_stage import DecorrelationStage
 from pipeline.stages.decorrelation.strategy.decode_prediction_strategy import (
     DecodePredictionStrategy as dps,
 )
+from pipeline.stages.decorrelation.strategy.transformation_strategy import BlockDCT as bd
 
 
 class TestDecorrelationStage(unittest.TestCase):
@@ -15,7 +16,7 @@ class TestDecorrelationStage(unittest.TestCase):
 
         # load sample video
         self.input_data = np.fromfile(
-            "test_videos\carphone_176x144.yuv", dtype=np.uint8
+            "test_videos/carphone_176x144.yuv", dtype=np.uint8
         )
         self.input_height = 144
         self.input_width = 176
@@ -162,6 +163,25 @@ class TestDecorrelationStage(unittest.TestCase):
         self.assertTrue(np.all(decoded_u >= 0) and np.all(decoded_u <= 255))
         self.assertTrue(np.all(decoded_v >= 0) and np.all(decoded_v <= 255))
 
+    def test_block_dct_on_yuv_first_frame(self):
+        """
+        Test the BlockDCT by applying DCT and inverse DCT on the first frame of a YUV video.
+        """
+        # Get first frame size (Y plane only) for YUV420p
+        frame_size = self.input_width * self.input_height * 3 // 2
+        first_frame = self.input_data[:frame_size]
+
+        video = ds.separate_yuv(first_frame, self.input_width, self.input_height)
+        original_y = video["y"].astype(np.float64)
+
+        dct = bd(width=self.input_width, height=self.input_height, block_size=8)
+
+        transformed = dct.transform(original_y)
+        reconstructed = dct.inverse_transform(transformed)
+
+        # Validate that reconstruction is close to original
+        np.testing.assert_array_almost_equal(reconstructed, original_y, decimal=5)
+        self.assertFalse(np.array_equal(transformed, original_y))
 
 if __name__ == "__main__":
     unittest.main()

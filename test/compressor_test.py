@@ -8,6 +8,7 @@ class TestCompressor(unittest.TestCase):
     def setUp(self):
         self.video_path = "test_videos/Sign_Irene_352x288.yuv"
         self.video_path_compressed = "test_videos/compressed/Sign_Irene_352x288.decp"
+        self.video_path_compressed_dct = "test_videos/compressed/Sign_Irene_352x288.dect"
         self.video_path_decompressed = "test_videos/decompressed/Sign_Irene_352x288.yuv"
         self.width = 352
         self.height = 288
@@ -23,6 +24,7 @@ class TestCompressor(unittest.TestCase):
 
         # Check if the output file is not empty
         self.assertGreater(os.path.getsize(output_path), 0, "Compressed file is empty.")
+ 
 
     def test_decompressor(self):
         """Test the compression and decompression process to ensure file integrity."""
@@ -34,6 +36,103 @@ class TestCompressor(unittest.TestCase):
 
         # Decompress the file
         decompressed_path = compressor.decompress_video(compressed_path)
+
+        # Verify the decompressed file exists
+        self.assertTrue(
+            os.path.isfile(decompressed_path),
+            f"Decompressed file not found at {decompressed_path}",
+        )
+
+        # Verify the decompressed file is not empty
+        self.assertGreater(
+            os.path.getsize(decompressed_path), 0, "Decompressed file is empty"
+        )
+
+        # Compare file sizes (should be the same for YUV420 format)
+        original_size = os.path.getsize(self.video_path)
+        decompressed_size = os.path.getsize(decompressed_path)
+
+        # Log file size details to help diagnose the issue
+        print(f"Original file size: {original_size} bytes")
+        print(f"Decompressed file size: {decompressed_size} bytes")
+        print(f"Difference: {original_size - decompressed_size} bytes")
+
+        self.assertEqual(
+            original_size,
+            decompressed_size,
+            f"File size mismatch: original={original_size} bytes, decompressed={decompressed_size} bytes",
+        )
+
+        # Validate content by checking a sample of bytes
+        with open(self.video_path, "rb") as f_orig, open(
+            decompressed_path, "rb"
+        ) as f_decomp:
+            # Read the entire files
+            orig_data = f_orig.read()
+            decomp_data = f_decomp.read()
+
+            # Check file lengths
+            print(f"Original read length: {len(orig_data)} bytes")
+            print(f"Decompressed read length: {len(decomp_data)} bytes")
+
+            # Find the position where differences start (if any)
+            min_len = min(len(orig_data), len(decomp_data))
+            for i in range(min_len):
+                if orig_data[i] != decomp_data[i]:
+                    print(f"First difference at byte position {i}")
+                    print(
+                        f"Original byte: {orig_data[i]}, Decompressed byte: {decomp_data[i]}"
+                    )
+                    break
+
+            # Read the first 1000 bytes (or whole file if smaller)
+            sample_size = min(1000, original_size)
+            f_orig.seek(0)
+            f_decomp.seek(0)
+            orig_data = f_orig.read(sample_size)
+            decomp_data = f_decomp.read(sample_size)
+
+            # Check if the samples match
+            self.assertEqual(
+                orig_data,
+                decomp_data,
+                "Content of decompressed file doesn't match the original",
+            )
+
+            # Optional: check random positions in larger files
+            if original_size > 10000:
+                # Check middle of file
+                mid_pos = original_size // 2
+                f_orig.seek(mid_pos)
+                f_decomp.seek(mid_pos)
+                self.assertEqual(
+                    f_orig.read(100),
+                    f_decomp.read(100),
+                    "Content mismatch in middle of file",
+                )
+
+                # Check end of file
+                end_pos = max(0, original_size - 1000)
+                f_orig.seek(end_pos)
+                f_decomp.seek(end_pos)
+                self.assertEqual(
+                    f_orig.read(), f_decomp.read(), "Content mismatch at end of file"
+                )
+
+        print(f"Compression-decompression validation successful for {self.video_path}")
+    def test_compressor_decompressor_dct(self):
+        """Test the compression and decompression process to ensure file integrity."""
+        compressor = Compressor()
+
+        # First compress the video
+        
+        compressed_path = compressor.compress_video_dct(
+            self.height, self.width, self.video_path
+        )
+        
+        
+        # Decompress the file
+        decompressed_path = compressor.decompress_video_with_dct(compressed_path)
 
         # Verify the decompressed file exists
         self.assertTrue(
