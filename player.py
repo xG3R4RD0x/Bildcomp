@@ -109,8 +109,9 @@ class Player:
         self.play_btn = tk.Button(self.control_frame, text="Play", width=5, command=self.toggle_play)
         self.next_btn = tk.Button(self.control_frame, text= ">>", command=self.step_forward)
         self.end_btn = tk.Button(self.control_frame, text=">|", command=self.jump_to_end)
-        self.frame_label = tk.Label(self.control_frame, text="Frame: -")
-
+        self.frame_label_left = tk.Label(self.control_frame, text="Frame left side: -")
+        self.frame_label_right = tk.Label(self.control_frame, text="Frame right side: -")
+        
         self.info_frame = tk.Frame(self.main_frame, width=100)
         self.info_frame.pack(side="top", anchor="nw", padx=0)
 
@@ -128,7 +129,8 @@ class Player:
         self.play_btn.pack(side="left", padx=2)
         self.next_btn.pack(side="left", padx=2)
         self.end_btn.pack(side="left", padx=2)
-        self.frame_label.pack(side="left", padx=5)
+        self.frame_label_left.pack(side="left", padx=5)
+        self.frame_label_right.pack(side="left", padx=5)
 
     def hide_controls(self):
         self.control_frame.pack_forget()
@@ -179,6 +181,10 @@ class Player:
             img = ImageTk.PhotoImage(frame)
             self.image_player_left.config(image=img, text="", compound=None)
             self.image_player_left.image = img
+            
+            frame_info_left = f"Frame left side: {self.frame_index_left if self.video_left else '-'} / "
+            frame_info_left += f"{(len(self.video_left.frames) - 1) if self.video_left else '-'}"
+            self.frame_label_left.config(text=frame_info_left)
 
         if self.video_right and self.video_right.frames:
             frame = self.video_right.frames[self.frame_index_right]
@@ -186,9 +192,9 @@ class Player:
             self.image_player_right.config(image=img, text="", compound=None)
             self.image_player_right.image = img
 
-        frame_info = f"Frame: {self.frame_index_left+1 if self.video_left else '-'} / "
-        frame_info += f"{len(self.video_left.frames) if self.video_left else '-'}"
-        self.frame_label.config(text=frame_info)
+            frame_info_right = f"Frame right side: {self.frame_index_right if self.video_right else '-'} / "
+            frame_info_right += f"{(len(self.video_right.frames) - 1) if self.video_right else '-'}"
+            self.frame_label_right.config(text=frame_info_right)
 
     def playback_loop(self):
         if not self.is_playing:
@@ -243,9 +249,9 @@ class Player:
     def jump_to_end(self):
         self.stop_playback()
         if self.video_left:
-            self.frame_index_left = len(self.video_left.frames)
+            self.frame_index_left = len(self.video_left.frames) -1
         if self.video_right:
-            self.frame_index_right = len(self.video_right.frames)
+            self.frame_index_right = len(self.video_right.frames) -1
         self.display_frames()
 
     def toggle_play(self):
