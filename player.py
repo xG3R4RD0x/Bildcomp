@@ -1,6 +1,7 @@
 import tkinter as tk
 from tkinter import filedialog
 from PIL import Image, ImageTk
+import numpy as np
 import os
 import sys
 from pipeline.stages.decorrelation.decorrelation_stage import DecorrelationStage
@@ -46,6 +47,8 @@ class Player:
         self.video_id = 0
         self.is_playing = False
         self.after_id = None
+
+        self.psnr_values = []
 
         self.root.geometry("500x400")
         self.root.title("BildKomp")
@@ -109,18 +112,15 @@ class Player:
         self.play_btn = tk.Button(self.control_frame, text="Play", width=5, command=self.toggle_play)
         self.next_btn = tk.Button(self.control_frame, text= ">>", command=self.step_forward)
         self.end_btn = tk.Button(self.control_frame, text=">|", command=self.jump_to_end)
-        self.frame_label_left = tk.Label(self.control_frame, text="Frame left side: -")
-        self.frame_label_right = tk.Label(self.control_frame, text="Frame right side: -")
-        
-        self.info_frame = tk.Frame(self.main_frame, width=100)
-        self.info_frame.pack(side="top", anchor="nw", padx=0)
 
-        self.left_info_frame = tk.Frame(self.info_frame, width=300)
-        self.left_info_frame.pack(side="left", anchor="nw")
-        #tk.Label(self.left_info_frame, text="Info-Bereich\n(in Entwicklung)", anchor="center").pack(pady=0, padx=20)
-        self.right_info_frame = tk.Frame(self.info_frame, width=30)
-        self.right_info_frame.pack(side="left", anchor="nw", padx=0)
-        #tk.Label(self.right_info_frame, text="VIDEO VON PSNR VISUALIZATION HERE\n", anchor="center").pack(pady=0, padx=0)
+        
+        self.info_frame = tk.Frame(self.main_frame, width=0)
+        self.left_info_frame = tk.Frame(self.info_frame, width=500)
+        self.psnr_label = tk.Label(self.left_info_frame, text="PSNR: -")
+        self.frame_label_left = tk.Label(self.left_info_frame, text="Frame left side: -")
+        self.frame_label_right = tk.Label(self.left_info_frame, text="Frame right side: -")
+        #self.right_info_frame = tk.Frame(self.info_frame, width=300, background="red")
+        #self.right_info_frame.pack(side="left", anchor="nw", padx=0)
 
     def show_controls(self):
         self.control_frame.pack(pady=2, anchor="nw")
@@ -129,8 +129,13 @@ class Player:
         self.play_btn.pack(side="left", padx=2)
         self.next_btn.pack(side="left", padx=2)
         self.end_btn.pack(side="left", padx=2)
-        self.frame_label_left.pack(side="left", padx=5)
-        self.frame_label_right.pack(side="left", padx=5)
+
+    def show_info_panel(self):
+        self.info_frame.pack(side="top", anchor="nw", padx=0)
+        self.left_info_frame.pack(side="left", anchor="nw")
+        self.psnr_label.pack(anchor='nw')
+        self.frame_label_left.pack(anchor="nw", padx=0)
+        self.frame_label_right.pack(anchor="nw", padx=0)
 
     def hide_controls(self):
         self.control_frame.pack_forget()
@@ -170,10 +175,15 @@ class Player:
                 print(f"Right video failed: {e}")
                 return
             
+        if self.video_left and self.video_right:
+            print("Calculating PSNR...")
+            self.precalculate_psnr()
+            
         self.video_id += 2
         self.jump_to_start()
         self.display_frames()
         self.show_controls()
+        self.show_info_panel()
 
     def display_frames(self):
         if self.video_left and self.video_left.frames:
@@ -195,6 +205,10 @@ class Player:
             frame_info_right = f"Frame right side: {self.frame_index_right if self.video_right else '-'} / "
             frame_info_right += f"{(len(self.video_right.frames) - 1) if self.video_right else '-'}"
             self.frame_label_right.config(text=frame_info_right)
+
+        if self.psnr_values:
+            psnr = self.psnr_values[self.frame_index_left]
+            self.psnr_label.config(text=f"PSNR: {psnr:.2f} dB")
 
     def playback_loop(self):
         if not self.is_playing:
@@ -262,6 +276,21 @@ class Player:
 
     def menu_save_file(self):
         pass
+
+    def precalculate_psnr(self):
+        self.psnr_values = []
+        if len(self.video_left.frames) != len(self.video_right.frames):
+            print("Videos do not have the same framesize")
+            return
+        for i in range(len(self.video_left.frames)):
+            psnr = self.calculate_psnr_of_frame(self.video_left.frames[i], self.video_right.frames[i])
+            self.psnr_values.append(psnr)
+
+    def calculate_psnr_of_frame(self, frame_left, frame_right):
+        arr1 = np.asarray(frame_left).astype(np.float32)
+        arr2 = np.asarray(frame_right).astype(np.float32)
+        mse = np.mean((arr1 - arr2) ** 2)
+        return 20 * np.log10(255.0) - 10 * np.log10(mse)
 
 if __name__ == "__main__":
     filename_arg = sys.argv[1] if len(sys.argv) >= 2 else None
