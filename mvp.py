@@ -1,4 +1,3 @@
-import itertools
 import math
 import struct
 import sys
@@ -11,7 +10,7 @@ from numba import njit
 class BitWriter:
     current_value: int = 0
     significant_bits: int = 0
-    output_bytes: bytes = bytes()
+    output_bytes: bytearray = bytearray()
 
     def write(self, code: int, num_bits: int):
         assert code < (1 << num_bits)
@@ -38,7 +37,7 @@ class BitWriter:
         assert self.significant_bits < 8
         if self.significant_bits > 0:
             byte = self.current_value << (8 - self.significant_bits)
-            self.output_bytes += bytes([byte])
+            self.output_bytes.append(byte)
 
 class BitReader:
     current_value: int = 0
@@ -67,16 +66,12 @@ class BitReader:
         bits = (self.current_value >> (self.significant_bits - num_bits)) & ((1 << num_bits) - 1)
         return bits
 
-    def read_huffman(self, bitlengths: list[int], codes: list[int]) -> int:
-        global first
-        lengths = sorted(set(bitlengths))
-        for l in lengths:
+    def read_huffman(self, sorted_bitlength_set: list[int], bitlengths: list[int], codes: list[int]) -> int:
+        for l in sorted_bitlength_set:
             if l == 0:
                 continue
             for i, length in enumerate(bitlengths):
                 if length == l and self.peek(length) == codes[i]:
-                    if first:
-                        print(f"len = {l} code = {codes[i]} x = {i}")
                     self.read(length)
                     return i
                 
@@ -137,11 +132,11 @@ class YUVImage:
     width: int
     height: int
 
-    y: list[int]
-    u: list[int]
-    v: list[int]
+    y: bytes
+    u: bytes
+    v: bytes
 
-    def __init__(self, width: int, height: int, y: list[int], u: list[int], v: list[int]):
+    def __init__(self, width: int, height: int, y: bytes, u: bytes, v: bytes):
         self.width = width
         self.height = height
 
@@ -229,9 +224,6 @@ class YUVImage:
                 f.write(bytes(data))
 
 
-first = True
-
-
 class Vid:
     fps: int
     frame_width: int
@@ -274,12 +266,10 @@ class Vid:
         self.quantization_v_levels = content[12]
 
         bitreader = BitReader(content[13:])
-        global first
-        first = True
 
         def read_frame_data(bitreader: BitReader, width: int, height: int, quantization_levels: int) -> list[int]:
             float_step = bitreader.read_float()
-            print(f"{float_step = }")
+            # print(f"{float_step = }")
             if float_step is None:
                 return None
 
@@ -292,19 +282,17 @@ class Vid:
                 bitlen = bitreader.read(4)
                 bitlengths.append(bitlen)
             huffman_codes = huffman_codes_from_bit_lengths(bitlengths)
+            sorted_bitlength_set = sorted(set(bitlengths))
             # print(f"{bitlengths = }")
             # print(f"{huffman_codes = }")
             # y_length_code_pairs = list(zip(bitlengths, huffman_codes))
             # print(f"{y_length_code_pairs = }")
 
-            global first
             dequantized_data = []
             for i in range(width * height):
                 # print(f"reading y value: {i} of {width * height}")
-                quantized_value = bitreader.read_huffman(bitlengths, huffman_codes)
+                quantized_value = bitreader.read_huffman(sorted_bitlength_set, bitlengths, huffman_codes)
 
-                if i >= 4:
-                    first = False
                 # print(f"{quantized_value = }")
                 dequantized_value = (quantized_value * float_step) + float_min
                 dequantized_data.append(dequantized_value)
@@ -312,7 +300,7 @@ class Vid:
             data = inverse_discrete_cosine_transform_2d(width, height, width, dequantized_data)
             return data
         
-        print(self.frame_width, self.frame_height, self.frame_width * self.frame_height)
+        # print(self.frame_width, self.frame_height, self.frame_width * self.frame_height)
         while y_data := read_frame_data(bitreader, self.frame_width, self.frame_height, self.quantization_y_levels):
             u_data = read_frame_data(bitreader, self.frame_width // 2, self.frame_height // 2, self.quantization_u_levels)
             assert u_data is not None
@@ -321,18 +309,18 @@ class Vid:
 
             frame = YUVImage(self.frame_width, self.frame_height, y_data, u_data, v_data)
             self.frames.append(frame)
-            print(f"frame: {len(self.frames)}")
+            print(f"frame: {len(self.frames)}\r", end='')
 
+        print(f"frame: {len(self.frames)}")
         return self
-    
+
     def save_to_file(self, filename: str):
         # TODO:
         #  - determine appropriate values for X_range for every frame from self.frames
         #  - serialize all frames into a bitstream
 
+        frames_bitwriter = BitWriter()
         def write_frame_data(fstep: float, fmin: float, length_code_pairs: list[Tuple[int, int]], data: list[int]):
-            if first:
-                print(f"{fstep = }       ")
             for byte in struct.pack('<f', fstep):
                 frames_bitwriter.write(byte, 8)
 
@@ -345,11 +333,8 @@ class Vid:
 
             for i, x in enumerate(data):
                 length, code = length_code_pairs[x]
-                if first and i < 4:
-                    print(f"[{i}] {x = } {code = } {length = }")
                 frames_bitwriter.write(code, length)
 
-        frames_bitwriter = BitWriter()
         for i, frame in enumerate(self.frames):
             print(f"Writing frame: {i}\r", end="")
             # decorrelation
@@ -444,9 +429,6 @@ class Vid:
             
             write_frame_data(y_step, y_min, y_length_code_pairs, y_quantized)
 
-            global first
-            if first:
-                first = False
                 # print(f"{y_bitlengths = }")
                 # print(f"{y_occurences = }")
                 # print(f"{y_symbols = }")
@@ -509,21 +491,36 @@ def inverse_discrete_cosine_transform_row(X: list[float]) -> list[int]:
     return xs
 
 @njit
+def precompute_dct_cosine_values(N: int) -> list[float]:
+    values: list[float] = []
+    for k in range(N):
+        for n in range(N):
+            v = math.cos((2 * n + 1) * k * math.pi / (2 * N))
+            values.append(v)
+    return values
+
+
+@njit
 def discrete_cosine_transform_2d(width: int, height: int, stride: int, data: list[int]) -> list[float]:
     # transform horizontally
     transformed_horizontally = []
     N = width
+
+    precomputed = precompute_dct_cosine_values(N)
+    sqrt2_repro = 1/math.sqrt(2)
+    sqrt2_over_N = math.sqrt(2/N)
+
     for y in range(height):
         for k in range(N):
-            C0 = 1/math.sqrt(2) if k == 0 else 1
+            C0 = sqrt2_repro if k == 0 else 1
 
             summed_xs = 0
             for x in range(width):
                 offset = (y * stride) + x
                 n = x
-                summed_xs += data[offset] * math.cos((2 * n + 1) * k * math.pi / (2 * N))
+                summed_xs += data[offset] * precomputed[k * N + n]
             
-            X = C0 * math.sqrt(2/N) * summed_xs
+            X = C0 * sqrt2_over_N * summed_xs
             transformed_horizontally.append(X)
 
     # transform vertically
@@ -567,8 +564,14 @@ def inverse_discrete_cosine_transform_2d(width: int, height: int, stride: int, d
     #         reconstructed_vertically[offset] = X
     
     # inverse transform horizontally
+
     reconstructed = []
     N = width
+
+    precomputed = precompute_dct_cosine_values(N)
+    sqrt2_repro = 1/math.sqrt(2)
+    sqrt2_over_N = math.sqrt(2/N)
+
     for y in range(height):
         for n in range(N):
 
@@ -577,17 +580,17 @@ def inverse_discrete_cosine_transform_2d(width: int, height: int, stride: int, d
                 offset = (y * stride) + x
                 k = x
 
-                C0 = 1/math.sqrt(2) if k == 0 else 1
-                summed_xs += C0 * data[offset] * math.cos((2 * n + 1) * k * math.pi / (2 * N))
+                C0 = sqrt2_repro if k == 0 else 1
+                summed_xs += C0 * data[offset] * precomputed[k * N + n]
+                # summed_xs += C0 * data[offset] * math.cos((2 * n + 1) * k * math.pi / (2 * N))
             
-            X = math.sqrt(2/N) * summed_xs
+            X = sqrt2_over_N * summed_xs
             reconstructed.append(X)
     return reconstructed
 
 
 ##### probability modelling #####
 
-@njit
 def occurence_distribution(data: list[int]) -> Dict[int, int]:
     occurences = dict()
     for x in data:
@@ -598,25 +601,20 @@ def occurence_distribution(data: list[int]) -> Dict[int, int]:
 
     return occurences
 
-@njit
 def entropy(occurences: list[int]) -> float:
     s = sum(occurences)
     return -sum([x/s * math.log(x/s, 2) for x in occurences])
 
 ##### entropy coding #####
 
-def huffman_coding(sorted_occurences: list[int]) -> list[int]:
-    # TODO: do huffman coding
-    pass
-
 def huffman_coding_length_limited(sorted_occurenes: list[int], max_bits: int) -> list[int]:
     # package-merge algorithm
     # TODO: add reference to paper + useful explanations
 
-    assert not any(x == 0 for x in sorted_occurenes)
-    assert max_bits > 0
-    assert len(sorted_occurenes) > 1
-    assert (1 << max_bits) >= len(sorted_occurenes)
+    # assert not any(x == 0 for x in sorted_occurenes)
+    # assert max_bits > 0
+    # assert len(sorted_occurenes) > 1
+    # assert (1 << max_bits) >= len(sorted_occurenes)
 
     initial_packages: list[Tuple[int, list[int]]] = []
     for i, occ in enumerate(sorted_occurenes):
@@ -650,7 +648,7 @@ def huffman_coding_length_limited(sorted_occurenes: list[int], max_bits: int) ->
 
     return bit_lengths
 
-@njit
+# @njit
 def huffman_codes_from_bit_lengths(bit_lengths: list[int]) -> list[int]:
     # https://www.rfc-editor.org/rfc/rfc1951.html#section-3.2.2
     MAX_BITS = max(bit_lengths)
@@ -677,16 +675,9 @@ def huffman_codes_from_bit_lengths(bit_lengths: list[int]) -> list[int]:
     return codes
 
 ##### main logic #####
-
 import time
-import matplotlib.pyplot as plt
 
 if __name__ == '__main__':
-    # print(f"{huffman_coding_length_limited([2, 3, 8, 2, 1], 3) = }")
-    # print(f"{huffman_coding_length_limited([2, 3, 8, 2, 1], 4) = }")
-    # print(f"{huffman_codes_from_bit_lengths([3, 3, 3, 3, 3, 2, 4, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]) = }")
-    # exit()
-
     args = sys.argv
     if len(args) != 2:
         exit(f"Usage: ./{args[0]} <filename>")
@@ -704,18 +695,19 @@ if __name__ == '__main__':
 
     frame_size = ys_size + us_size + vs_size
 
-    tga_frames = []
+    # tga_frames = []
     frames = []
-    while len(content) > frame_size:
+    offset = 0
+    while len(content) - offset >= frame_size:
         print(f"\rProcessing frame: {len(frames)}", end="")
-        ys = list(content[0:ys_size])
-        us = list(content[ys_size:][:us_size])
-        vs = list(content[ys_size+us_size:][:vs_size])
-        content = content[frame_size:]
+        ys = content[offset:offset+ys_size]
+        us = content[offset+ys_size:offset+ys_size+us_size]
+        vs = content[offset+ys_size+us_size:offset+ys_size+us_size+vs_size]
+        offset += frame_size
 
         frame = YUVImage(metadata.width, metadata.height, ys, us, vs)
         frames.append(frame)
-        tga_frames.append(frame.tga_data())
+        # tga_frames.append(frame.tga_data())
 
         # if len(frames) == 1:
         #     occ1 = occurence_distribution(frames[0].y)
@@ -744,16 +736,16 @@ if __name__ == '__main__':
 
     vid = Vid.read_from_file("output.vid")
 
-    with open('output/SOCCER_352x288_30_orig_02.yuv', 'wb') as f:
+    with open('output/output.yuv', 'wb') as f:
         for frame in vid.frames:
             f.write(bytes([max(0, min(int(x), 255)) for x in frame.y]))
             f.write(bytes([max(0, min(int(x), 255)) for x in frame.u]))
             f.write(bytes([max(0, min(int(x), 255)) for x in frame.v]))
 
-    frames = vid.frames
-    assert len(frames) > 0
-    tga_frames = [frame.tga_data() for frame in frames]
-    for frame in tga_frames:
-        with open("output.tga", 'wb') as f:
-            f.write(bytes(frame))
-        time.sleep(1 / vid.fps)
+    # frames = vid.frames
+    # assert len(frames) > 0
+    # tga_frames = [frame.tga_data() for frame in frames]
+    # for frame in tga_frames:
+    #     with open("output.tga", 'wb') as f:
+    #         f.write(bytes(frame))
+    #     time.sleep(1 / vid.fps)
