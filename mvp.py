@@ -223,6 +223,27 @@ class YUVImage:
         with open(output_filename, 'wb') as f:
                 f.write(bytes(data))
 
+    def calculate_psnr(a: Self, b: Self) -> float:
+        assert(a.width == b.width)
+        assert(a.height == b.height)
+        assert(len(a.y) == len(b.y))
+        assert(len(a.u) == len(b.u))
+        assert(len(a.v) == len(b.v))
+
+        squared_error = 0
+        for ay, by in zip(a.y, b.y):
+            squared_error += (ay - by) * (ay - by)
+        for au, bu in zip(a.u, b.u):
+            squared_error += (au - bu) * (au - bu)
+        for av, bv in zip(a.v, b.v):
+            squared_error += (av - bv) * (av - bv)
+        num_elements = len(a.y) + len(a.u) + len(a.v)
+
+        psnr_max2 = 255 * 255
+        psnr_mse = squared_error / num_elements
+        psnr = 10 * math.log10(psnr_max2 / psnr_mse)
+        return psnr
+
 
 class Vid:
     fps: int
@@ -261,9 +282,9 @@ class Vid:
 
         self = Vid(fps, frame_width, frame_height, [])
 
-        self.quantization_y_levels = content[10]
-        self.quantization_u_levels = content[11]
-        self.quantization_v_levels = content[12]
+        self.quantization_y_levels = content[10] + 1
+        self.quantization_u_levels = content[11] + 1
+        self.quantization_v_levels = content[12] + 1
 
         bitreader = BitReader(content[13:])
 
@@ -292,13 +313,15 @@ class Vid:
             for i in range(width * height):
                 # print(f"reading y value: {i} of {width * height}")
                 quantized_value = bitreader.read_huffman(sorted_bitlength_set, bitlengths, huffman_codes)
+                normalized_value = (quantized_value / (quantization_levels - 1)) * (float_step - float_min)
+                dequantized_value = normalized_value + float_min
 
                 # print(f"{quantized_value = }")
-                dequantized_value = (quantized_value * float_step) + float_min
+                # dequantized_value = (quantized_value * float_step) + float_min
                 dequantized_data.append(dequantized_value)
 
             data = inverse_discrete_cosine_transform_2d(width, height, width, dequantized_data)
-            return data
+            return bytes(data)
         
         # print(self.frame_width, self.frame_height, self.frame_width * self.frame_height)
         while y_data := read_frame_data(bitreader, self.frame_width, self.frame_height, self.quantization_y_levels):
@@ -335,109 +358,47 @@ class Vid:
                 length, code = length_code_pairs[x]
                 frames_bitwriter.write(code, length)
 
+
         for i, frame in enumerate(self.frames):
             print(f"Writing frame: {i}\r", end="")
-            # decorrelation
-            transformed_y = discrete_cosine_transform_2d(self.frame_width, self.frame_height, self.frame_width, frame.y)
-            transformed_u = discrete_cosine_transform_2d(self.frame_width // 2, self.frame_height // 2, self.frame_width // 2, frame.u)
-            transformed_v = discrete_cosine_transform_2d(self.frame_width // 2, self.frame_height // 2, self.frame_width // 2, frame.v)
+            components = [
+                (frame.y, self.quantization_y_levels, self.frame_width, self.frame_height),
+                (frame.u, self.quantization_u_levels, self.frame_width // 2, self.frame_height // 2),
+                (frame.v, self.quantization_v_levels, self.frame_width // 2, self.frame_height // 2),
+            ]
+            for (c, quantization_levels, width, height) in components:
+                # decorrelation
+                c_transformed = discrete_cosine_transform_2d(width, height, width, c)
 
-            # quantization
-            y_range = max(abs(x) for x in transformed_y)
-            u_range = max(abs(x) for x in transformed_u)
-            v_range = max(abs(x) for x in transformed_v)
+                # quantization
+                c_max = max(c_transformed)
+                c_min = min(c_transformed)
+                c_range = c_max - c_min
+                c_quantized = [min(int(round((x - c_min) / c_range * (quantization_levels - 1))), quantization_levels - 1) for x in c_transformed]
 
-            y_max = max(transformed_y)
-            u_max = max(transformed_u)
-            v_max = max(transformed_v)
+                # probability modelling
+                occurences = occurence_distribution(c_quantized)
+                symbols = []
+                symbol_counts = []
+                for k, v in occurences.items():
+                    symbols.append(k)
+                    symbol_counts.append(v)
 
-            y_min = min(transformed_y)
-            u_min = min(transformed_u)
-            v_min = min(transformed_v)
-
-            y_range = y_max - y_min
-            u_range = u_max - u_min
-            v_range = v_max - v_min
-
-            y_step = y_range / self.quantization_y_levels
-            u_step = u_range / self.quantization_u_levels
-            v_step = v_range / self.quantization_v_levels
             
-            y_quantized = [min(int((x - y_min) // y_step), self.quantization_y_levels - 1) for x in transformed_y]
-            u_quantized = [min(int((x - u_min) // u_step), self.quantization_u_levels - 1) for x in transformed_u]
-            v_quantized = [min(int((x - v_min) // v_step), self.quantization_v_levels - 1) for x in transformed_v]
+                # entropy coding
+                bitlengths = huffman_coding_length_limited(symbol_counts, 15)
+                bitlengths_all = []
+                for i in range(quantization_levels):
+                    bitlen = 0
+                    if i in symbols:
+                        index = symbols.index(i)
+                        bitlen = bitlengths[index]
+                    bitlengths_all.append(bitlen)
 
-            # probability modelling
-            y_occurences = occurence_distribution(y_quantized)
-            u_occurences = occurence_distribution(u_quantized)
-            v_occurences = occurence_distribution(v_quantized)
-
-            y_symbols = []
-            y_symbol_counts = []
-            for k, v in y_occurences.items():
-                y_symbols.append(k)
-                y_symbol_counts.append(v)
-
-            u_symbols = []
-            u_symbol_counts = []
-            for k, v in u_occurences.items():
-                u_symbols.append(k)
-                u_symbol_counts.append(v)
-
-            v_symbols = []
-            v_symbol_counts = []
-            for k, v in v_occurences.items():
-                v_symbols.append(k)
-                v_symbol_counts.append(v)
-
-            # entropy coding
-            y_bitlengths = huffman_coding_length_limited(y_symbol_counts, 15)
-            u_bitlengths = huffman_coding_length_limited(u_symbol_counts, 15)
-            v_bitlengths = huffman_coding_length_limited(v_symbol_counts, 15)
-
-            y_bitlengths_all = []
-            for i in range(self.quantization_y_levels):
-                bitlen = 0
-                if i in y_symbols:
-                    index = y_symbols.index(i)
-                    bitlen = y_bitlengths[index]
-                y_bitlengths_all.append(bitlen)
-
-            u_bitlengths_all = []
-            for i in range(self.quantization_u_levels):
-                bitlen = 0
-                if i in u_symbols:
-                    index = u_symbols.index(i)
-                    bitlen = u_bitlengths[index]
-                u_bitlengths_all.append(bitlen)
-
-            v_bitlengths_all = []
-            for i in range(self.quantization_v_levels):
-                bitlen = 0
-                if i in v_symbols:
-                    index = v_symbols.index(i)
-                    bitlen = v_bitlengths[index]
-                v_bitlengths_all.append(bitlen)
-
-            y_codes = huffman_codes_from_bit_lengths(y_bitlengths_all)
-            u_codes = huffman_codes_from_bit_lengths(u_bitlengths_all)
-            v_codes = huffman_codes_from_bit_lengths(v_bitlengths_all)
-
-            y_length_code_pairs = list(zip(y_bitlengths_all, y_codes))
-            u_length_code_pairs = list(zip(u_bitlengths_all, u_codes))
-            v_length_code_pairs = list(zip(v_bitlengths_all, v_codes))
-            
-            write_frame_data(y_step, y_min, y_length_code_pairs, y_quantized)
-
-                # print(f"{y_bitlengths = }")
-                # print(f"{y_occurences = }")
-                # print(f"{y_symbols = }")
-                # print(f"{y_length_code_pairs = }")
-
-
-            write_frame_data(u_step, u_min, u_length_code_pairs, u_quantized)
-            write_frame_data(v_step, v_min, v_length_code_pairs, v_quantized)
-            
+                codes = huffman_codes_from_bit_lengths(bitlengths_all)
+                length_code_pairs = list(zip(bitlengths_all, codes))
+                
+                write_frame_data(c_max, c_min, length_code_pairs, c_quantized)
         
         print(f"Written all {len(self.frames)} frames")
         frames_bitwriter.flush()
@@ -450,13 +411,9 @@ class Vid:
             f.write(int.to_bytes(self.frame_width, 2, 'little'))
             f.write(int.to_bytes(self.frame_height, 2, 'little'))
 
-            f.write(int.to_bytes(self.quantization_y_levels, 1, 'little'))
-            f.write(int.to_bytes(self.quantization_u_levels, 1, 'little'))
-            f.write(int.to_bytes(self.quantization_v_levels, 1, 'little'))
-
-            # f.write(bytes(struct.pack('<f', self._quantization_y_range)))
-            # f.write(bytes(struct.pack('<f', self._quantization_u_range)))
-            # f.write(bytes(struct.pack('<f', self._quantization_v_range)))
+            f.write(int.to_bytes(self.quantization_y_levels - 1, 1, 'little'))
+            f.write(int.to_bytes(self.quantization_u_levels - 1, 1, 'little'))
+            f.write(int.to_bytes(self.quantization_v_levels - 1, 1, 'little'))
 
             f.write(frames_bitwriter.output_bytes)
         
@@ -503,7 +460,7 @@ def precompute_dct_cosine_values(N: int) -> list[float]:
 @njit
 def discrete_cosine_transform_2d(width: int, height: int, stride: int, data: list[int]) -> list[float]:
     # transform horizontally
-    transformed_horizontally = []
+    transformed_horizontally = [0] * (width * height)
     N = width
 
     precomputed = precompute_dct_cosine_values(N)
@@ -519,24 +476,30 @@ def discrete_cosine_transform_2d(width: int, height: int, stride: int, data: lis
                 offset = (y * stride) + x
                 n = x
                 summed_xs += data[offset] * precomputed[k * N + n]
+                # summed_xs += data[offset] * math.cos((2 * n + 1) * math.pi * k / (2 * N))
             
             X = C0 * sqrt2_over_N * summed_xs
-            transformed_horizontally.append(X)
+            transformed_horizontally[y * stride + k] = X
 
     # transform vertically
     # transformed = [0] * width * height
     # N = height
+
+    # precomputed = precompute_dct_cosine_values(N)
+    # sqrt2_repro = 1/math.sqrt(2)
+    # sqrt2_over_N = math.sqrt(2/N)
+
     # for x in range(width):
     #     for k in range(N):
-    #         C0 = 1/math.sqrt(2) if k == 0 else 1
+    #         C0 = sqrt2_repro if k == 0 else 1
             
     #         summed_xs = 0
     #         for y in range(height):
     #             offset = (y * stride) + x
     #             n = y
-    #             summed_xs += transformed_horizontally[offset] * math.cos((2 * n + 1) * k * math.pi / (2 * N))
+    #             summed_xs += transformed_horizontally[offset] * precomputed[k * N + n]
             
-    #         X = C0 * math.sqrt(2/N) * summed_xs
+    #         X = C0 * sqrt2_over_N * summed_xs
     #         offset = (k * width) + x # NOTE: we are intentionally using k and width instead of stride, because this is in terms of the output coefficients
     #         transformed[offset] = X
 
@@ -560,12 +523,12 @@ def inverse_discrete_cosine_transform_2d(width: int, height: int, stride: int, d
     #             summed_xs += C0 * data[offset] * math.cos((2 * n + 1) * k * math.pi / (2 * N))
             
     #         X = math.sqrt(2/N) * summed_xs
-    #         offset = (k * width) + x # NOTE: we are intentionally using k and width instead of stride, because this is in terms of the output coefficients
+    #         offset = (n * width) + x # NOTE: we are intentionally using k and width instead of stride, because this is in terms of the output coefficients
     #         reconstructed_vertically[offset] = X
     
     # inverse transform horizontally
 
-    reconstructed = []
+    reconstructed = [0] * (width * height)
     N = width
 
     precomputed = precompute_dct_cosine_values(N)
@@ -582,10 +545,12 @@ def inverse_discrete_cosine_transform_2d(width: int, height: int, stride: int, d
 
                 C0 = sqrt2_repro if k == 0 else 1
                 summed_xs += C0 * data[offset] * precomputed[k * N + n]
+                # summed_xs += C0 * reconstructed_vertically[offset] * precomputed[k * N + n]
                 # summed_xs += C0 * data[offset] * math.cos((2 * n + 1) * k * math.pi / (2 * N))
             
             X = sqrt2_over_N * summed_xs
-            reconstructed.append(X)
+            X = max(0, min(int(X), 255))
+            reconstructed[y * stride + n] = X
     return reconstructed
 
 
@@ -738,9 +703,12 @@ if __name__ == '__main__':
 
     with open('output/output.yuv', 'wb') as f:
         for frame in vid.frames:
-            f.write(bytes([max(0, min(int(x), 255)) for x in frame.y]))
-            f.write(bytes([max(0, min(int(x), 255)) for x in frame.u]))
-            f.write(bytes([max(0, min(int(x), 255)) for x in frame.v]))
+            f.write(frame.y)
+            f.write(frame.u)
+            f.write(frame.v)
+            # f.write(bytes([max(0, min(int(x), 255)) for x in frame.y]))
+            # f.write(bytes([max(0, min(int(x), 255)) for x in frame.u]))
+            # f.write(bytes([max(0, min(int(x), 255)) for x in frame.v]))
 
     # frames = vid.frames
     # assert len(frames) > 0
