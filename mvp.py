@@ -459,92 +459,108 @@ def precompute_dct_cosine_values(N: int) -> list[float]:
 
 @njit
 def discrete_cosine_transform_2d(width: int, height: int, stride: int, data: list[int]) -> list[float]:
-    # transform horizontally
-    transformed_horizontally = [0] * (width * height)
-    N = width
-
-    sqrt2_repro = 1/math.sqrt(2)
-    sqrt2_over_N = math.sqrt(2/N)
-
-    for y in range(height):
-        for k in range(N):
-            C0 = sqrt2_repro if k == 0 else 1
-
-            summed_xs = 0
-            for x in range(width):
-                offset = (y * stride) + x
-                n = x
-                # summed_xs += data[offset] * precomputed[k * N + n]
-                summed_xs += data[offset] * math.cos((2 * n + 1) * math.pi * k / (2 * N))
-            
-            X = C0 * sqrt2_over_N * summed_xs
-            transformed_horizontally[y * stride + k] = X
-
-    # transform vertically
     transformed = [0] * width * height
-    N = height
+
+    block_width = 8
+    block_height = 8
+    blocks_per_row = width // block_width
+    block = [0] * (block_width * block_height)
 
     sqrt2_repro = 1/math.sqrt(2)
-    sqrt2_over_N = math.sqrt(2/N)
+    sqrt2_over_N_width = math.sqrt(2/block_width)
+    sqrt2_over_N_height = math.sqrt(2/block_height)
 
-    for x in range(width):
-        for k in range(N):
-            C0 = sqrt2_repro if k == 0 else 1
-            
-            summed_xs = 0
-            for y in range(height):
-                offset = (y * stride) + x
-                n = y
-                summed_xs += transformed_horizontally[offset] * math.cos((2 * n + 1) * math.pi * k / (2 * N))
-            
-            X = C0 * sqrt2_over_N * summed_xs
-            offset = (k * width) + x # NOTE: we are intentionally using k and width instead of stride, because this is in terms of the output coefficients
-            transformed[offset] = X
+    num_blocks = (width * height) // (block_width * block_height)
+    for block_index in range(num_blocks):
+        yoff = block_height * (block_index // blocks_per_row)
+        xoff = block_width * (block_index % blocks_per_row)
+
+        # transform horizontally
+        N = block_width
+        for y in range(block_height):
+            for k in range(N):
+                C0 = sqrt2_repro if k == 0 else 1
+
+                summed_xs = 0
+                for x in range(block_width):
+                    offset = ((y + yoff) * stride) + (x + xoff)
+                    n = x
+                    summed_xs += data[offset] * math.cos((2 * n + 1) * math.pi * k / (2 * N))
+
+                X = C0 * sqrt2_over_N_width * summed_xs
+                block[y * block_width + k] = X
+
+        # transform vertically
+        N = block_height
+        for x in range(block_width):
+            for k in range(N):
+                C0 = sqrt2_repro if k == 0 else 1
+
+                summed_xs = 0
+                for y in range(block_height):
+                    offset = (y * block_width) + x
+                    n = y
+                    summed_xs += block[offset] * math.cos((2 * n + 1) * math.pi * k / (2 * N))
+
+                X = C0 * sqrt2_over_N_height * summed_xs
+                offset = ((k + yoff) * width) + (x + xoff) # NOTE: we are intentionally using k and width instead of stride, because this is in terms of the output coefficients
+                transformed[offset] = X
 
     return transformed
 
 @njit
 def inverse_discrete_cosine_transform_2d(width: int, height: int, stride: int, data: list[float]) -> list[int]:
-    # inverse transform vertically
-    reconstructed_vertically = [0] * width * height
-    N = height
-    for x in range(width):
-        for n in range(N):
-            
-            summed_xs = 0
-            for y in range(height):
-                offset = (y * stride) + x
-                k = y
+    reconstructed = [0] * width * height
 
-                C0 = 1/math.sqrt(2) if k == 0 else 1
-                summed_xs += C0 * data[offset] * math.cos((2 * n + 1) * k * math.pi / (2 * N))
-            
-            X = math.sqrt(2/N) * summed_xs
-            offset = (n * width) + x # NOTE: we are intentionally using k and width instead of stride, because this is in terms of the output coefficients
-            reconstructed_vertically[offset] = X
-    
-    # inverse transform horizontally
-
-    reconstructed = [0] * (width * height)
-    N = width
+    block_width = 8
+    block_height = 8
+    blocks_per_row = width // block_width
+    block = [0] * (block_width * block_height)
 
     sqrt2_repro = 1/math.sqrt(2)
-    sqrt2_over_N = math.sqrt(2/N)
+    sqrt2_over_N_width = math.sqrt(2/block_width)
+    sqrt2_over_N_height = math.sqrt(2/block_height)
 
-    for y in range(height):
-        for n in range(N):
+    num_blocks = (width * height) // (block_width * block_height)
+    for block_index in range(num_blocks):
+        yoff = block_height * (block_index // blocks_per_row)
+        xoff = block_width * (block_index % blocks_per_row)
 
-            summed_xs = 0
-            for x in range(width):
-                offset = (y * stride) + x
-                k = x
+        # inverse transform vertically
+        N = block_height
+        for x in range(block_width):
+            for n in range(N):
 
-                C0 = sqrt2_repro if k == 0 else 1
-                summed_xs += C0 * reconstructed_vertically[offset] * math.cos((2 * n + 1) * k * math.pi / (2 * N))
-            
-            X = sqrt2_over_N * summed_xs
-            X = max(0, min(int(X), 255))
-            reconstructed[y * stride + n] = X
+                summed_xs = 0
+                for y in range(block_height):
+                    offset = ((y + yoff) * stride) + (x + xoff)
+                    k = y
+
+                    C0 = 1/math.sqrt(2) if k == 0 else 1
+                    summed_xs += C0 * data[offset] * math.cos((2 * n + 1) * k * math.pi / (2 * N))
+
+                X = sqrt2_over_N_height * summed_xs
+                offset = (n * block_width) + x
+                block[offset] = X
+
+        # inverse transform horizontally
+        N = block_width
+        for y in range(block_height):
+            for n in range(N):
+
+                summed_xs = 0
+                for x in range(block_width):
+                    offset = (y * block_height) + x
+                    k = x
+
+                    C0 = sqrt2_repro if k == 0 else 1
+                    summed_xs += C0 * block[offset] * math.cos((2 * n + 1) * k * math.pi / (2 * N))
+
+                X = sqrt2_over_N_width * summed_xs
+                X = max(0, min(int(X), 255)) # clamp the output, so we have valid byte values for each component
+                offset = ((y + yoff) * width) + (n + xoff)
+                reconstructed[offset] = X
+
     return reconstructed
 
 
