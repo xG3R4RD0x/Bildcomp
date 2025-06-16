@@ -463,7 +463,6 @@ def discrete_cosine_transform_2d(width: int, height: int, stride: int, data: lis
     transformed_horizontally = [0] * (width * height)
     N = width
 
-    precomputed = precompute_dct_cosine_values(N)
     sqrt2_repro = 1/math.sqrt(2)
     sqrt2_over_N = math.sqrt(2/N)
 
@@ -475,63 +474,60 @@ def discrete_cosine_transform_2d(width: int, height: int, stride: int, data: lis
             for x in range(width):
                 offset = (y * stride) + x
                 n = x
-                summed_xs += data[offset] * precomputed[k * N + n]
-                # summed_xs += data[offset] * math.cos((2 * n + 1) * math.pi * k / (2 * N))
+                # summed_xs += data[offset] * precomputed[k * N + n]
+                summed_xs += data[offset] * math.cos((2 * n + 1) * math.pi * k / (2 * N))
             
             X = C0 * sqrt2_over_N * summed_xs
             transformed_horizontally[y * stride + k] = X
 
     # transform vertically
-    # transformed = [0] * width * height
-    # N = height
+    transformed = [0] * width * height
+    N = height
 
-    # precomputed = precompute_dct_cosine_values(N)
-    # sqrt2_repro = 1/math.sqrt(2)
-    # sqrt2_over_N = math.sqrt(2/N)
+    sqrt2_repro = 1/math.sqrt(2)
+    sqrt2_over_N = math.sqrt(2/N)
 
-    # for x in range(width):
-    #     for k in range(N):
-    #         C0 = sqrt2_repro if k == 0 else 1
+    for x in range(width):
+        for k in range(N):
+            C0 = sqrt2_repro if k == 0 else 1
             
-    #         summed_xs = 0
-    #         for y in range(height):
-    #             offset = (y * stride) + x
-    #             n = y
-    #             summed_xs += transformed_horizontally[offset] * precomputed[k * N + n]
+            summed_xs = 0
+            for y in range(height):
+                offset = (y * stride) + x
+                n = y
+                summed_xs += transformed_horizontally[offset] * math.cos((2 * n + 1) * math.pi * k / (2 * N))
             
-    #         X = C0 * sqrt2_over_N * summed_xs
-    #         offset = (k * width) + x # NOTE: we are intentionally using k and width instead of stride, because this is in terms of the output coefficients
-    #         transformed[offset] = X
+            X = C0 * sqrt2_over_N * summed_xs
+            offset = (k * width) + x # NOTE: we are intentionally using k and width instead of stride, because this is in terms of the output coefficients
+            transformed[offset] = X
 
-    # return transformed
-    return transformed_horizontally
+    return transformed
 
 @njit
 def inverse_discrete_cosine_transform_2d(width: int, height: int, stride: int, data: list[float]) -> list[int]:
     # inverse transform vertically
-    # reconstructed_vertically = [0] * width * height
-    # N = height
-    # for x in range(width):
-    #     for n in range(N):
+    reconstructed_vertically = [0] * width * height
+    N = height
+    for x in range(width):
+        for n in range(N):
             
-    #         summed_xs = 0
-    #         for y in range(height):
-    #             offset = (y * stride) + x
-    #             k = y
+            summed_xs = 0
+            for y in range(height):
+                offset = (y * stride) + x
+                k = y
 
-    #             C0 = 1/math.sqrt(2) if k == 0 else 1
-    #             summed_xs += C0 * data[offset] * math.cos((2 * n + 1) * k * math.pi / (2 * N))
+                C0 = 1/math.sqrt(2) if k == 0 else 1
+                summed_xs += C0 * data[offset] * math.cos((2 * n + 1) * k * math.pi / (2 * N))
             
-    #         X = math.sqrt(2/N) * summed_xs
-    #         offset = (n * width) + x # NOTE: we are intentionally using k and width instead of stride, because this is in terms of the output coefficients
-    #         reconstructed_vertically[offset] = X
+            X = math.sqrt(2/N) * summed_xs
+            offset = (n * width) + x # NOTE: we are intentionally using k and width instead of stride, because this is in terms of the output coefficients
+            reconstructed_vertically[offset] = X
     
     # inverse transform horizontally
 
     reconstructed = [0] * (width * height)
     N = width
 
-    precomputed = precompute_dct_cosine_values(N)
     sqrt2_repro = 1/math.sqrt(2)
     sqrt2_over_N = math.sqrt(2/N)
 
@@ -544,9 +540,7 @@ def inverse_discrete_cosine_transform_2d(width: int, height: int, stride: int, d
                 k = x
 
                 C0 = sqrt2_repro if k == 0 else 1
-                summed_xs += C0 * data[offset] * precomputed[k * N + n]
-                # summed_xs += C0 * reconstructed_vertically[offset] * precomputed[k * N + n]
-                # summed_xs += C0 * data[offset] * math.cos((2 * n + 1) * k * math.pi / (2 * N))
+                summed_xs += C0 * reconstructed_vertically[offset] * math.cos((2 * n + 1) * k * math.pi / (2 * N))
             
             X = sqrt2_over_N * summed_xs
             X = max(0, min(int(X), 255))
