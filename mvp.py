@@ -600,9 +600,9 @@ def huffman_coding_length_limited(sorted_occurenes: list[int], max_bits: int) ->
     for i in range(max_bits - 1):
         new_packages = []
 
-        for i in range(len(packages) // 2):
-            p0: Tuple[list[int], int] = packages[i * 2 + 0] # every even indexed item
-            p1: Tuple[list[int], int] = packages[i * 2 + 1] # every  odd indexed item
+        for j in range(len(packages) // 2):
+            p0: Tuple[int, list[int]] = packages[j * 2 + 0] # every even indexed item
+            p1: Tuple[int, list[int]] = packages[j * 2 + 1] # every  odd indexed item
 
             items = []
             items.extend(p0[1])
@@ -619,6 +619,7 @@ def huffman_coding_length_limited(sorted_occurenes: list[int], max_bits: int) ->
 
     bit_lengths = []
     for i in range(len(sorted_occurenes)):
+        assert symbols_flattened.count(i) <= max_bits
         bit_lengths.append(symbols_flattened.count(i))
 
     return bit_lengths
@@ -629,7 +630,7 @@ def huffman_codes_from_bit_lengths(bit_lengths: list[int]) -> list[int]:
     MAX_BITS = max(bit_lengths)
 
     bl_count = []
-    for i in range(0, max(bit_lengths)):
+    for i in range(0, max(bit_lengths) + 1):
         bl_count.append(bit_lengths.count(i))
 
     next_code = [0]
