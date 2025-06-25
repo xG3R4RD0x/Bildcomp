@@ -241,6 +241,8 @@ class YUVImage:
 
         psnr_max2 = 255 * 255
         psnr_mse = squared_error / num_elements
+        if (psnr_mse == 0):
+            return math.inf
         psnr = 10 * math.log10(psnr_max2 / psnr_mse)
         return psnr
 
