@@ -293,10 +293,6 @@ class Vid:
             if float_max is None:
                 return None
 
-            float_min = bitreader.read_float()
-
-            # step = (2 * float_range) / quantization_levels
-
             quantization_levels = bitreader.read(32)
             bitlengths = []
             for i in range(quantization_levels):
@@ -304,18 +300,12 @@ class Vid:
                 bitlengths.append(bitlen)
             huffman_codes = huffman_codes_from_bit_lengths(bitlengths)
             sorted_bitlength_set = sorted(set(bitlengths))
-            # print(f"{bitlengths = }")
-            # print(f"{huffman_codes = }")
-            # y_length_code_pairs = list(zip(bitlengths, huffman_codes))
-            # print(f"{y_length_code_pairs = }")
 
             dequantized_data = []
             for i in range(width * height):
                 # print(f"reading y value: {i} of {width * height}")
                 quantized_value = bitreader.read_huffman(sorted_bitlength_set, bitlengths, huffman_codes)
-
-                # normalized_value = (quantized_value / (quantization_levels - 1)) * (float_max - float_min)
-                dequantized_value = dequantize_value(quantized_value, float_max, quantization_levels) # normalized_value + float_min
+                dequantized_value = dequantize_value(quantized_value, float_max, quantization_levels)
 
                 # print(f"{quantized_value = }")
                 # dequantized_value = (quantized_value * float_step) + float_min
@@ -341,16 +331,9 @@ class Vid:
         return self
 
     def save_to_file(self, filename: str):
-        # TODO:
-        #  - determine appropriate values for X_range for every frame from self.frames
-        #  - serialize all frames into a bitstream
-
         frames_bitwriter = BitWriter()
-        def write_frame_data(fstep: float, fmin: float, length_code_pairs: list[Tuple[int, int]], data: list[int]):
-            for byte in struct.pack('<f', fstep):
-                frames_bitwriter.write(byte, 8)
-
-            for byte in struct.pack('<f', fmin):
+        def write_frame_data(abs_max: float, length_code_pairs: list[Tuple[int, int]], data: list[int]):
+            for byte in struct.pack('<f', abs_max):
                 frames_bitwriter.write(byte, 8)
 
             frames_bitwriter.write(len(length_code_pairs), 32)
@@ -378,8 +361,6 @@ class Vid:
                 c_max = max(c_transformed)
                 c_min = min(c_transformed)
                 c_abs_max = max(abs(c_max), abs(c_min))
-                c_max = c_abs_max
-                # c_range = c_abs_max * 2 # c_max - c_min
                 quantization_levels = round(c_abs_max / quantization_interval) * 2
                 c_quantized = [quantize_value(x, c_abs_max, quantization_levels) for x in c_transformed]
 
@@ -390,7 +371,6 @@ class Vid:
                 for k, v in occurences.items():
                     symbols.append(k)
                     symbol_counts.append(v)
-
 
                 # entropy coding
                 bitlengths = huffman_coding_length_limited(symbol_counts, (1 << 5) - 1)
@@ -406,7 +386,7 @@ class Vid:
                 length_code_pairs = list(zip(bitlengths_all, codes))
                 assert(len(length_code_pairs) == quantization_levels)
 
-                write_frame_data(c_max, c_min, length_code_pairs, c_quantized)
+                write_frame_data(c_abs_max, length_code_pairs, c_quantized)
 
         print(f"Written all {len(self.frames)} frames")
         frames_bitwriter.flush()
