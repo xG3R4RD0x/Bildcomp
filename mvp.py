@@ -74,11 +74,11 @@ class BitReader:
                 if length == l and self.peek(length) == codes[i]:
                     self.read(length)
                     return i
-                
+
         assert False
 
     def read_float(self) -> float | None:
-        additional_bytes_needed = ((32 - self.significant_bits) + 7) // 8 
+        additional_bytes_needed = ((32 - self.significant_bits) + 7) // 8
         if additional_bytes_needed > len(self.input_bytes[self.byte_offset:]):
             return None
 
@@ -116,14 +116,14 @@ def parse_raw_metadata_from_filename(filename: str) -> RawYUVMetadata | None:
             dimensions_str = part
         elif fps_str is None:
             fps_str = part
-            
+
     if dimensions_str is None:
         return None
 
     width, height = [int(x) for x in dimensions_str.split('x')]
-    
+
     fps = 25
-    if fps_str != None:
+    if fps_str is not None:
         fps = int(fps_str)
 
     return RawYUVMetadata(width, height, fps)
@@ -249,10 +249,10 @@ class Vid:
     fps: int
     frame_width: int
     frame_height: int
-    
-    quantization_y_levels: int
-    quantization_u_levels: int
-    quantization_v_levels: int
+
+    quantization_y_interval: float
+    quantization_u_interval: float
+    quantization_v_interval: float
 
     frames: list[YUVImage]
 
@@ -261,9 +261,9 @@ class Vid:
         self.frame_width = frame_width
         self.frame_height = frame_height
 
-        self.quantization_u_levels = 128
-        self.quantization_v_levels = 128
-        self.quantization_y_levels = 128
+        self.quantization_y_interval = 10.0
+        self.quantization_u_interval = 10.0
+        self.quantization_v_interval = 10.0
 
         self.frames = frames
 
@@ -271,10 +271,10 @@ class Vid:
         content = None
         with open(filename, 'rb') as f:
             content = f.read()
-        
+
         if content[:4] != b'.VID' or content[4] != 0:
             raise ValueError("Invalid file format")
-        
+
 
         fps = content[5]
         frame_width = int.from_bytes(content[6:8], 'little')
@@ -282,25 +282,25 @@ class Vid:
 
         self = Vid(fps, frame_width, frame_height, [])
 
-        self.quantization_y_levels = content[10] + 1
-        self.quantization_u_levels = content[11] + 1
-        self.quantization_v_levels = content[12] + 1
+        self.quantization_y_interval = struct.unpack('<f', content[10:14])
+        self.quantization_u_interval = struct.unpack('<f', content[14:18])
+        self.quantization_v_interval = struct.unpack('<f', content[18:22])
 
-        bitreader = BitReader(content[13:])
+        bitreader = BitReader(content[22:])
 
-        def read_frame_data(bitreader: BitReader, width: int, height: int, quantization_levels: int) -> list[int]:
-            float_step = bitreader.read_float()
-            # print(f"{float_step = }")
-            if float_step is None:
+        def read_frame_data(bitreader: BitReader, width: int, height: int) -> list[int]:
+            float_max = bitreader.read_float()
+            if float_max is None:
                 return None
 
             float_min = bitreader.read_float()
 
             # step = (2 * float_range) / quantization_levels
 
+            quantization_levels = bitreader.read(32)
             bitlengths = []
             for i in range(quantization_levels):
-                bitlen = bitreader.read(4)
+                bitlen = bitreader.read(5)
                 bitlengths.append(bitlen)
             huffman_codes = huffman_codes_from_bit_lengths(bitlengths)
             sorted_bitlength_set = sorted(set(bitlengths))
@@ -313,8 +313,9 @@ class Vid:
             for i in range(width * height):
                 # print(f"reading y value: {i} of {width * height}")
                 quantized_value = bitreader.read_huffman(sorted_bitlength_set, bitlengths, huffman_codes)
-                normalized_value = (quantized_value / (quantization_levels - 1)) * (float_step - float_min)
-                dequantized_value = normalized_value + float_min
+
+                # normalized_value = (quantized_value / (quantization_levels - 1)) * (float_max - float_min)
+                dequantized_value = dequantize_value(quantized_value, float_max, quantization_levels) # normalized_value + float_min
 
                 # print(f"{quantized_value = }")
                 # dequantized_value = (quantized_value * float_step) + float_min
@@ -322,19 +323,21 @@ class Vid:
 
             data = inverse_discrete_cosine_transform_2d(width, height, width, dequantized_data)
             return bytes(data)
-        
+
         # print(self.frame_width, self.frame_height, self.frame_width * self.frame_height)
-        while y_data := read_frame_data(bitreader, self.frame_width, self.frame_height, self.quantization_y_levels):
-            u_data = read_frame_data(bitreader, self.frame_width // 2, self.frame_height // 2, self.quantization_u_levels)
+        while y_data := read_frame_data(bitreader, self.frame_width, self.frame_height):
+            u_data = read_frame_data(bitreader, self.frame_width // 2, self.frame_height // 2)
             assert u_data is not None
-            v_data = read_frame_data(bitreader, self.frame_width // 2, self.frame_height // 2, self.quantization_v_levels)
+            v_data = read_frame_data(bitreader, self.frame_width // 2, self.frame_height // 2)
             assert v_data is not None
 
             frame = YUVImage(self.frame_width, self.frame_height, y_data, u_data, v_data)
-            self.frames.append(frame)
-            print(f"frame: {len(self.frames)}\r", end='')
+            # frame.save_as_tga('output.tga')
 
-        print(f"frame: {len(self.frames)}")
+            self.frames.append(frame)
+            print(f"Decoding frame: {len(self.frames)}\r", end='')
+
+        print(f"Decoding frame: {len(self.frames)}")
         return self
 
     def save_to_file(self, filename: str):
@@ -350,9 +353,10 @@ class Vid:
             for byte in struct.pack('<f', fmin):
                 frames_bitwriter.write(byte, 8)
 
+            frames_bitwriter.write(len(length_code_pairs), 32)
             for bitlen, _ in length_code_pairs:
-                assert bitlen < (1 << 4)
-                frames_bitwriter.write(bitlen, 4)
+                assert bitlen < (1 << 5)
+                frames_bitwriter.write(bitlen, 5)
 
             for i, x in enumerate(data):
                 length, code = length_code_pairs[x]
@@ -362,19 +366,22 @@ class Vid:
         for i, frame in enumerate(self.frames):
             print(f"Writing frame: {i}\r", end="")
             components = [
-                (frame.y, self.quantization_y_levels, self.frame_width, self.frame_height),
-                (frame.u, self.quantization_u_levels, self.frame_width // 2, self.frame_height // 2),
-                (frame.v, self.quantization_v_levels, self.frame_width // 2, self.frame_height // 2),
+                (frame.y, self.quantization_y_interval, self.frame_width, self.frame_height),
+                (frame.u, self.quantization_u_interval, self.frame_width // 2, self.frame_height // 2),
+                (frame.v, self.quantization_v_interval, self.frame_width // 2, self.frame_height // 2),
             ]
-            for (c, quantization_levels, width, height) in components:
+            for (c, quantization_interval, width, height) in components:
                 # decorrelation
                 c_transformed = discrete_cosine_transform_2d(width, height, width, c)
 
                 # quantization
                 c_max = max(c_transformed)
                 c_min = min(c_transformed)
-                c_range = c_max - c_min
-                c_quantized = [min(int(round((x - c_min) / c_range * (quantization_levels - 1))), quantization_levels - 1) for x in c_transformed]
+                c_abs_max = max(abs(c_max), abs(c_min))
+                c_max = c_abs_max
+                # c_range = c_abs_max * 2 # c_max - c_min
+                quantization_levels = round(c_abs_max / quantization_interval) * 2
+                c_quantized = [quantize_value(x, c_abs_max, quantization_levels) for x in c_transformed]
 
                 # probability modelling
                 occurences = occurence_distribution(c_quantized)
@@ -384,9 +391,9 @@ class Vid:
                     symbols.append(k)
                     symbol_counts.append(v)
 
-            
+
                 # entropy coding
-                bitlengths = huffman_coding_length_limited(symbol_counts, 15)
+                bitlengths = huffman_coding_length_limited(symbol_counts, (1 << 5) - 1)
                 bitlengths_all = []
                 for i in range(quantization_levels):
                     bitlen = 0
@@ -397,9 +404,10 @@ class Vid:
 
                 codes = huffman_codes_from_bit_lengths(bitlengths_all)
                 length_code_pairs = list(zip(bitlengths_all, codes))
-                
+                assert(len(length_code_pairs) == quantization_levels)
+
                 write_frame_data(c_max, c_min, length_code_pairs, c_quantized)
-        
+
         print(f"Written all {len(self.frames)} frames")
         frames_bitwriter.flush()
 
@@ -411,12 +419,12 @@ class Vid:
             f.write(int.to_bytes(self.frame_width, 2, 'little'))
             f.write(int.to_bytes(self.frame_height, 2, 'little'))
 
-            f.write(int.to_bytes(self.quantization_y_levels - 1, 1, 'little'))
-            f.write(int.to_bytes(self.quantization_u_levels - 1, 1, 'little'))
-            f.write(int.to_bytes(self.quantization_v_levels - 1, 1, 'little'))
+            f.write(struct.pack('<f', self.quantization_y_interval))
+            f.write(struct.pack('<f', self.quantization_u_interval))
+            f.write(struct.pack('<f', self.quantization_v_interval))
 
             f.write(frames_bitwriter.output_bytes)
-        
+
 
 ##### decorrelation #####
 
@@ -425,11 +433,11 @@ def discrete_cosine_transform_row(x: list[int]) -> list[float]:
     Xs = []
     for k in range(N):
         C0 = 1/math.sqrt(2) if k == 0 else 1
-        
+
         summed_xs = 0
         for n in range(N):
             summed_xs += x[n] * math.cos((2 * n + 1) * k * math.pi / (2 * N))
-        
+
         X = C0 * math.sqrt(2/N) * summed_xs
         Xs.append(X)
     return Xs
@@ -442,7 +450,7 @@ def inverse_discrete_cosine_transform_row(X: list[float]) -> list[int]:
         for k in range(N):
             C0 = 1/math.sqrt(2) if k == 0 else 1
             summed_Xs += C0 * X[k] * math.cos((2 * n + 1) * k * math.pi / (2 * N))
-        
+
         x = math.sqrt(2/N) * summed_Xs
         xs.append(round(x))
     return xs
@@ -557,11 +565,30 @@ def inverse_discrete_cosine_transform_2d(width: int, height: int, stride: int, d
                     summed_xs += C0 * block[offset] * math.cos((2 * n + 1) * k * math.pi / (2 * N))
 
                 X = sqrt2_over_N_width * summed_xs
-                X = max(0, min(int(X), 255)) # clamp the output, so we have valid byte values for each component
+                X = max(0, min(int(round(X)), 255)) # clamp the output, so we have valid byte values for each component
                 offset = ((y + yoff) * width) + (n + xoff)
                 reconstructed[offset] = X
 
     return reconstructed
+
+##### quantization #####
+
+def quantize_value(value: float, abs_max: float, quantization_levels: int) -> int:
+    quantization_levels_half = quantization_levels // 2
+    quantized_signed = round(value / abs_max * (quantization_levels_half - 1))
+    assert(abs(quantized_signed) < quantization_levels_half)
+    if quantized_signed < 0:
+        quantized_signed += quantization_levels
+    return quantized_signed
+
+def dequantize_value(quantized: int, abs_max: float, quantization_levels: int) -> float:
+    quantization_levels_half = quantization_levels // 2
+    if quantized >= quantization_levels_half:
+        quantized -= quantization_levels
+    assert(abs(quantized) < quantization_levels_half)
+
+    value = quantized / (quantization_levels_half - 1) * abs_max
+    return value
 
 
 ##### probability modelling #####
@@ -651,8 +678,6 @@ def huffman_codes_from_bit_lengths(bit_lengths: list[int]) -> list[int]:
     return codes
 
 ##### main logic #####
-import time
-
 if __name__ == '__main__':
     args = sys.argv
     if len(args) != 2:
@@ -717,10 +742,8 @@ if __name__ == '__main__':
             f.write(frame.y)
             f.write(frame.u)
             f.write(frame.v)
-            # f.write(bytes([max(0, min(int(x), 255)) for x in frame.y]))
-            # f.write(bytes([max(0, min(int(x), 255)) for x in frame.u]))
-            # f.write(bytes([max(0, min(int(x), 255)) for x in frame.v]))
 
+    # import time
     # frames = vid.frames
     # assert len(frames) > 0
     # tga_frames = [frame.tga_data() for frame in frames]
