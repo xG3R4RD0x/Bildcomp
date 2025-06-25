@@ -2,8 +2,9 @@ import math
 import struct
 import sys
 from typing import Dict, Self, Tuple
-from numba import njit
+from os.path import basename
 
+from numba import njit
 
 ##### utils #####
 
@@ -100,10 +101,11 @@ class RawYUVMetadata:
         self.height = height
         self.fps = fps
 
-def parse_raw_metadata_from_filename(filename: str) -> RawYUVMetadata | None:
+def parse_raw_metadata_from_filename(path: str) -> RawYUVMetadata | None:
     dimensions_str = None
     fps_str = None
 
+    filename = basename(path)
     filename_no_ext = filename.split('.', 1)[0]
     for part in filename_no_ext.split('_'):
         if len(part) == 0 or not part[0].isdigit():
