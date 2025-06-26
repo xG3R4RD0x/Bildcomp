@@ -362,9 +362,11 @@ class Vid:
                 c_transformed = discrete_cosine_transform_2d(width, height, width, c)
 
                 # quantization
-                c_max = max(c_transformed)
-                c_min = min(c_transformed)
-                c_abs_max = max(abs(c_max), abs(c_min))
+                # TODO: min max in one iteration
+                c_abs_max = max(abs(c_transformed))
+                # c_max = max(c_transformed)
+                # c_min = min(c_transformed)
+                # c_abs_max = max(abs(c_max), abs(c_min))
                 quantization_levels = round(c_abs_max / quantization_interval) * 2
                 c_quantized = [quantize_value(x, c_abs_max, quantization_levels) for x in c_transformed]
 
@@ -379,6 +381,7 @@ class Vid:
                 # entropy coding
                 bitlengths = huffman_coding_length_limited(symbol_counts, (1 << 5) - 1)
                 bitlengths_all = []
+                # TODO: symbols is sorted, so don't search
                 for i in range(quantization_levels):
                     bitlen = 0
                     if i in symbols:
@@ -453,6 +456,7 @@ def precompute_dct_cosine_values(N: int) -> list[float]:
 def discrete_cosine_transform_2d(width: int, height: int, stride: int, data: list[int]) -> list[float]:
     transformed = [0] * width * height
 
+    # TODO: assumes width and height multiple of 8, fix that
     block_width = 8
     block_height = 8
     blocks_per_row = width // block_width
@@ -559,6 +563,7 @@ def inverse_discrete_cosine_transform_2d(width: int, height: int, stride: int, d
 
 def quantize_value(value: float, abs_max: float, quantization_levels: int) -> int:
     quantization_levels_half = quantization_levels // 2
+    # TODO: use interval width instead of abs_max and quantization_levels
     quantized_signed = round(value / abs_max * (quantization_levels_half - 1))
     assert(abs(quantized_signed) < quantization_levels_half)
     if quantized_signed < 0:
@@ -571,6 +576,7 @@ def dequantize_value(quantized: int, abs_max: float, quantization_levels: int) -
         quantized -= quantization_levels
     assert(abs(quantized) < quantization_levels_half)
 
+    # TODO: use interval width instead
     value = quantized / (quantization_levels_half - 1) * abs_max
     return value
 
