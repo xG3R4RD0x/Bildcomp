@@ -380,7 +380,7 @@ class Vid:
 
                         # decorrelation
                         # TODO: implement prediction
-                        c_transformed = discrete_cosine_transform_2d(BLOCK_SIZE[0], BLOCK_SIZE[1], width, c[byte_offset:])
+                        c_transformed = discrete_cosine_transform_block(width, c[byte_offset:])
                         c_quantized = [round(x / quantization_interval) for x in c_transformed]
 
                         # reconstruct frame for prediction
@@ -398,7 +398,6 @@ class Vid:
                                 frame_reconstructed[dest_offset] = c_inverse_transformed[src_offset]
 
                 # quantization
-                # TODO: min max in one iteration
                 quantized_max = max(abs(x) for x in frame_quantized)
                 quantization_levels = quantized_max * 2 + 2
                 frame_quantized = [x + (quantization_levels // 2) for x in frame_quantized]
@@ -413,6 +412,7 @@ class Vid:
 
                 # entropy coding
                 bitlengths = huffman_coding_length_limited(symbol_counts, CODEWORD_MAX_BITS)
+
                 bitlengths_all = []
                 # TODO: symbols is sorted, so don't search
                 for i in range(quantization_levels):
@@ -486,50 +486,41 @@ def precompute_dct_cosine_values(N: int) -> list[float]:
 
 
 @njit
-def discrete_cosine_transform_2d(width: int, height: int, stride: int, data: list[int]) -> list[float]:
-    transformed = [0] * width * height
+def discrete_cosine_transform_block(stride: int, data: list[int]) -> list[float]:
+    transformed = [0] * BLOCK_SIZE[0] * BLOCK_SIZE[1]
+    block = [0] * BLOCK_SIZE[0] * BLOCK_SIZE[1]
 
     # TODO: assumes width and height multiple of 8, fix that
-    block_width = 8
-    block_height = 8
-    blocks_per_row = width // block_width
-    block = [0] * (block_width * block_height)
+    # transform horizontally
+    N = BLOCK_SIZE[0]
+    for y in range(BLOCK_SIZE[1]):
+        for k in range(N):
+            C0 = SQRT2_REPRO if k == 0 else 1
 
-    num_blocks = (width * height) // (block_width * block_height)
-    for block_index in range(num_blocks):
-        yoff = block_height * (block_index // blocks_per_row)
-        xoff = block_width * (block_index % blocks_per_row)
+            summed_xs = 0
+            for x in range(BLOCK_SIZE[0]):
+                offset = (y * stride) + x
+                n = x
+                summed_xs += data[offset] * math.cos((2 * n + 1) * math.pi * k / (2 * N))
 
-        # transform horizontally
-        N = block_width
-        for y in range(block_height):
-            for k in range(N):
-                C0 = SQRT2_REPRO if k == 0 else 1
+            X = C0 * SQRT2_OVER_BLOCK_WIDTH * summed_xs
+            block[y * BLOCK_SIZE[0] + k] = X
 
-                summed_xs = 0
-                for x in range(block_width):
-                    offset = ((y + yoff) * stride) + (x + xoff)
-                    n = x
-                    summed_xs += data[offset] * math.cos((2 * n + 1) * math.pi * k / (2 * N))
+    # transform vertically
+    N = BLOCK_SIZE[1]
+    for x in range(BLOCK_SIZE[0]):
+        for k in range(N):
+            C0 = SQRT2_REPRO if k == 0 else 1
 
-                X = C0 * SQRT2_OVER_BLOCK_WIDTH * summed_xs
-                block[y * block_width + k] = X
+            summed_xs = 0
+            for y in range(BLOCK_SIZE[1]):
+                offset = (y * BLOCK_SIZE[0]) + x
+                n = y
+                summed_xs += block[offset] * math.cos((2 * n + 1) * math.pi * k / (2 * N))
 
-        # transform vertically
-        N = block_height
-        for x in range(block_width):
-            for k in range(N):
-                C0 = SQRT2_REPRO if k == 0 else 1
-
-                summed_xs = 0
-                for y in range(block_height):
-                    offset = (y * block_width) + x
-                    n = y
-                    summed_xs += block[offset] * math.cos((2 * n + 1) * math.pi * k / (2 * N))
-
-                X = C0 * SQRT2_OVER_BLOCK_HEIGHT * summed_xs
-                offset = ((k + yoff) * width) + (x + xoff) # NOTE: we are intentionally using k and width instead of stride, because this is in terms of the output coefficients
-                transformed[offset] = X
+            X = C0 * SQRT2_OVER_BLOCK_HEIGHT * summed_xs
+            offset = (k * BLOCK_SIZE[0]) + x # NOTE: we are intentionally using k and width instead of stride, because this is in terms of the output coefficients
+            transformed[offset] = X
 
     return transformed
 
