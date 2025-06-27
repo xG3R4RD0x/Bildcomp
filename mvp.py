@@ -6,6 +6,10 @@ from os.path import basename
 
 from numba import njit
 
+##### configuration settings #####
+
+BLOCK_SIZE = (8, 8)
+
 ##### utils #####
 
 class BitWriter:
@@ -293,8 +297,8 @@ class Vid:
         bitreader = BitReader(content[22:])
 
         def read_frame_data(bitreader: BitReader, width: int, height: int) -> list[int]:
-            float_max = bitreader.read_float()
-            if float_max is None:
+            quantization_interval = bitreader.read_float()
+            if quantization_interval is None:
                 return None
 
             quantization_levels = bitreader.read(32)
@@ -309,10 +313,8 @@ class Vid:
             for i in range(width * height):
                 # print(f"reading y value: {i} of {width * height}")
                 quantized_value = bitreader.read_huffman(sorted_bitlength_set, bitlengths, huffman_codes)
-                dequantized_value = dequantize_value(quantized_value, float_max, quantization_levels)
-
-                # print(f"{quantized_value = }")
-                # dequantized_value = (quantized_value * float_step) + float_min
+                dequantized_value = quantized_value - (quantization_levels // 2)
+                dequantized_value *= quantization_interval
                 dequantized_data.append(dequantized_value)
 
             data = inverse_discrete_cosine_transform_2d(width, height, width, dequantized_data)
@@ -336,8 +338,8 @@ class Vid:
 
     def save_to_file(self, filename: str):
         frames_bitwriter = BitWriter()
-        def write_frame_data(abs_max: float, length_code_pairs: list[Tuple[int, int]], data: list[int]):
-            for byte in struct.pack('<f', abs_max):
+        def write_frame_data(quantization_interval: float, length_code_pairs: list[Tuple[int, int]], data: list[int]):
+            for byte in struct.pack('<f', quantization_interval):
                 frames_bitwriter.write(byte, 8)
 
             frames_bitwriter.write(len(length_code_pairs), 32)
@@ -349,7 +351,6 @@ class Vid:
                 length, code = length_code_pairs[x]
                 frames_bitwriter.write(code, length)
 
-
         for i, frame in enumerate(self.frames):
             print(f"Writing frame: {i}\r", end="")
             components = [
@@ -358,30 +359,45 @@ class Vid:
                 (frame.v, self.quantization_v_interval, self.frame_width // 2, self.frame_height // 2),
             ]
             for (c, quantization_interval, width, height) in components:
-                # for block_y in range(blocks_per_column):
-                #     for block_x in range(blocks_per_row):
-                #         # block_index = (block_y * blocks_per_row) + block_x
-                #         byte_offset = (block_y * blocks_per_row * BLOCK_SIZE[0] * BLOCK_SIZE[1]) + (block_x * BLOCK_SIZE[0])
-                #         c_transformed = discrete_cosine_transform_2d(BLOCK_SIZE[0], BLOCK_SIZE[1], width, c[byte_offset:])
-                #         c_abs_max = max(abs(x) for x in c_transformed)
+                frame_quantized = [0] * width * height
+                frame_reconstructed = [0] * width * height
 
-                #         c_quantized = [quantize_value(x, c_abs_max, quantization_levels) for x in c_transformed]
-                #         pass
+                assert width % BLOCK_SIZE[0] == 0
+                assert height % BLOCK_SIZE[1] == 0
+                blocks_per_row = width // BLOCK_SIZE[0]
+                blocks_per_column = height // BLOCK_SIZE[1]
+
+                for block_y in range(blocks_per_column):
+                    for block_x in range(blocks_per_row):
+                        byte_offset = (block_y * blocks_per_row * BLOCK_SIZE[0] * BLOCK_SIZE[1]) + (block_x * BLOCK_SIZE[0])
+                        c_transformed = discrete_cosine_transform_2d(BLOCK_SIZE[0], BLOCK_SIZE[1], width, c[byte_offset:])
+                        c_quantized = [round(x / quantization_interval) for x in c_transformed]
+
+                        # reconstruct frame for prediction
+                        c_reconstructed = [x * quantization_interval for x in c_quantized]
+                        c_inverse_transformed = inverse_discrete_cosine_transform_2d(BLOCK_SIZE[0], BLOCK_SIZE[1], BLOCK_SIZE[1], c_reconstructed)
+
+                        # store data in frame
+                        for y in range(BLOCK_SIZE[1]):
+                            for x in range(BLOCK_SIZE[0]):
+                                src_offset = (y * BLOCK_SIZE[0]) + x
+                                dest_offset = byte_offset + (y * width) + x
+                                frame_quantized[dest_offset] = c_quantized[src_offset]
+
+                                # for prediction
+                                frame_reconstructed[dest_offset] = c_inverse_transformed[src_offset]
 
                 # decorrelation
-                c_transformed = discrete_cosine_transform_2d(width, height, width, c)
+                # c_transformed = discrete_cosine_transform_2d(width, height, width, c)
 
                 # quantization
                 # TODO: min max in one iteration
-                c_abs_max = max(abs(x) for x in c_transformed)
-                # c_max = max(c_transformed)
-                # c_min = min(c_transformed)
-                # c_abs_max = max(abs(c_max), abs(c_min))
-                quantization_levels = round(c_abs_max / quantization_interval) * 2
-                c_quantized = [quantize_value(x, c_abs_max, quantization_levels) for x in c_transformed]
+                quantized_max = max(abs(x) for x in frame_quantized)
+                quantization_levels = quantized_max * 2 + 2
+                frame_quantized = [x + (quantization_levels // 2) for x in frame_quantized]
 
                 # probability modelling
-                occurences = occurence_distribution(c_quantized)
+                occurences = occurence_distribution(frame_quantized)
                 symbols = []
                 symbol_counts = []
                 for k, v in occurences.items():
@@ -403,7 +419,7 @@ class Vid:
                 length_code_pairs = list(zip(bitlengths_all, codes))
                 assert(len(length_code_pairs) == quantization_levels)
 
-                write_frame_data(c_abs_max, length_code_pairs, c_quantized)
+                write_frame_data(quantization_interval, length_code_pairs, frame_quantized)
 
         print(f"Written all {len(self.frames)} frames")
         frames_bitwriter.flush()
@@ -568,28 +584,6 @@ def inverse_discrete_cosine_transform_2d(width: int, height: int, stride: int, d
                 reconstructed[offset] = X
 
     return reconstructed
-
-##### quantization #####
-
-def quantize_value(value: float, abs_max: float, quantization_levels: int) -> int:
-    quantization_levels_half = quantization_levels // 2
-    # TODO: use interval width instead of abs_max and quantization_levels
-    quantized_signed = round(value / abs_max * (quantization_levels_half - 1))
-    assert(abs(quantized_signed) < quantization_levels_half)
-    if quantized_signed < 0:
-        quantized_signed += quantization_levels
-    return quantized_signed
-
-def dequantize_value(quantized: int, abs_max: float, quantization_levels: int) -> float:
-    quantization_levels_half = quantization_levels // 2
-    if quantized >= quantization_levels_half:
-        quantized -= quantization_levels
-    assert(abs(quantized) < quantization_levels_half)
-
-    # TODO: use interval width instead
-    value = quantized / (quantization_levels_half - 1) * abs_max
-    return value
-
 
 ##### probability modelling #####
 
