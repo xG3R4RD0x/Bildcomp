@@ -10,6 +10,13 @@ from numba import njit
 
 BLOCK_SIZE = (8, 8)
 
+SQRT2_REPRO = 1/math.sqrt(2)
+SQRT2_OVER_BLOCK_WIDTH = math.sqrt(2/BLOCK_SIZE[0])
+SQRT2_OVER_BLOCK_HEIGHT = math.sqrt(2/BLOCK_SIZE[1])
+
+CODEWORD_MAX_BITS = 31
+CODEWORD_LENGTH_BITS = int.bit_length(CODEWORD_MAX_BITS)
+
 ##### utils #####
 
 class BitWriter:
@@ -304,7 +311,7 @@ class Vid:
             quantization_levels = bitreader.read(32)
             bitlengths = []
             for i in range(quantization_levels):
-                bitlen = bitreader.read(5)
+                bitlen = bitreader.read(CODEWORD_LENGTH_BITS)
                 bitlengths.append(bitlen)
             huffman_codes = huffman_codes_from_bit_lengths(bitlengths)
             sorted_bitlength_set = sorted(set(bitlengths))
@@ -344,8 +351,8 @@ class Vid:
 
             frames_bitwriter.write(len(length_code_pairs), 32)
             for bitlen, _ in length_code_pairs:
-                assert bitlen < (1 << 5)
-                frames_bitwriter.write(bitlen, 5)
+                assert bitlen <= CODEWORD_MAX_BITS
+                frames_bitwriter.write(bitlen, CODEWORD_LENGTH_BITS)
 
             for i, x in enumerate(data):
                 length, code = length_code_pairs[x]
@@ -370,6 +377,9 @@ class Vid:
                 for block_y in range(blocks_per_column):
                     for block_x in range(blocks_per_row):
                         byte_offset = (block_y * blocks_per_row * BLOCK_SIZE[0] * BLOCK_SIZE[1]) + (block_x * BLOCK_SIZE[0])
+
+                        # decorrelation
+                        # TODO: implement prediction
                         c_transformed = discrete_cosine_transform_2d(BLOCK_SIZE[0], BLOCK_SIZE[1], width, c[byte_offset:])
                         c_quantized = [round(x / quantization_interval) for x in c_transformed]
 
@@ -387,9 +397,6 @@ class Vid:
                                 # for prediction
                                 frame_reconstructed[dest_offset] = c_inverse_transformed[src_offset]
 
-                # decorrelation
-                # c_transformed = discrete_cosine_transform_2d(width, height, width, c)
-
                 # quantization
                 # TODO: min max in one iteration
                 quantized_max = max(abs(x) for x in frame_quantized)
@@ -405,7 +412,7 @@ class Vid:
                     symbol_counts.append(v)
 
                 # entropy coding
-                bitlengths = huffman_coding_length_limited(symbol_counts, (1 << 5) - 1)
+                bitlengths = huffman_coding_length_limited(symbol_counts, CODEWORD_MAX_BITS)
                 bitlengths_all = []
                 # TODO: symbols is sorted, so don't search
                 for i in range(quantization_levels):
@@ -488,10 +495,6 @@ def discrete_cosine_transform_2d(width: int, height: int, stride: int, data: lis
     blocks_per_row = width // block_width
     block = [0] * (block_width * block_height)
 
-    sqrt2_repro = 1/math.sqrt(2)
-    sqrt2_over_N_width = math.sqrt(2/block_width)
-    sqrt2_over_N_height = math.sqrt(2/block_height)
-
     num_blocks = (width * height) // (block_width * block_height)
     for block_index in range(num_blocks):
         yoff = block_height * (block_index // blocks_per_row)
@@ -501,7 +504,7 @@ def discrete_cosine_transform_2d(width: int, height: int, stride: int, data: lis
         N = block_width
         for y in range(block_height):
             for k in range(N):
-                C0 = sqrt2_repro if k == 0 else 1
+                C0 = SQRT2_REPRO if k == 0 else 1
 
                 summed_xs = 0
                 for x in range(block_width):
@@ -509,14 +512,14 @@ def discrete_cosine_transform_2d(width: int, height: int, stride: int, data: lis
                     n = x
                     summed_xs += data[offset] * math.cos((2 * n + 1) * math.pi * k / (2 * N))
 
-                X = C0 * sqrt2_over_N_width * summed_xs
+                X = C0 * SQRT2_OVER_BLOCK_WIDTH * summed_xs
                 block[y * block_width + k] = X
 
         # transform vertically
         N = block_height
         for x in range(block_width):
             for k in range(N):
-                C0 = sqrt2_repro if k == 0 else 1
+                C0 = SQRT2_REPRO if k == 0 else 1
 
                 summed_xs = 0
                 for y in range(block_height):
@@ -524,7 +527,7 @@ def discrete_cosine_transform_2d(width: int, height: int, stride: int, data: lis
                     n = y
                     summed_xs += block[offset] * math.cos((2 * n + 1) * math.pi * k / (2 * N))
 
-                X = C0 * sqrt2_over_N_height * summed_xs
+                X = C0 * SQRT2_OVER_BLOCK_HEIGHT * summed_xs
                 offset = ((k + yoff) * width) + (x + xoff) # NOTE: we are intentionally using k and width instead of stride, because this is in terms of the output coefficients
                 transformed[offset] = X
 
@@ -538,10 +541,6 @@ def inverse_discrete_cosine_transform_2d(width: int, height: int, stride: int, d
     block_height = 8
     blocks_per_row = width // block_width
     block = [0] * (block_width * block_height)
-
-    sqrt2_repro = 1/math.sqrt(2)
-    sqrt2_over_N_width = math.sqrt(2/block_width)
-    sqrt2_over_N_height = math.sqrt(2/block_height)
 
     num_blocks = (width * height) // (block_width * block_height)
     for block_index in range(num_blocks):
@@ -558,10 +557,10 @@ def inverse_discrete_cosine_transform_2d(width: int, height: int, stride: int, d
                     offset = ((y + yoff) * stride) + (x + xoff)
                     k = y
 
-                    C0 = 1/math.sqrt(2) if k == 0 else 1
+                    C0 = SQRT2_REPRO if k == 0 else 1
                     summed_xs += C0 * data[offset] * math.cos((2 * n + 1) * k * math.pi / (2 * N))
 
-                X = sqrt2_over_N_height * summed_xs
+                X = SQRT2_OVER_BLOCK_HEIGHT * summed_xs
                 offset = (n * block_width) + x
                 block[offset] = X
 
@@ -575,10 +574,10 @@ def inverse_discrete_cosine_transform_2d(width: int, height: int, stride: int, d
                     offset = (y * block_height) + x
                     k = x
 
-                    C0 = sqrt2_repro if k == 0 else 1
+                    C0 = SQRT2_REPRO if k == 0 else 1
                     summed_xs += C0 * block[offset] * math.cos((2 * n + 1) * k * math.pi / (2 * N))
 
-                X = sqrt2_over_N_width * summed_xs
+                X = SQRT2_OVER_BLOCK_WIDTH * summed_xs
                 X = max(0, min(int(round(X)), 255)) # clamp the output, so we have valid byte values for each component
                 offset = ((y + yoff) * width) + (n + xoff)
                 reconstructed[offset] = X
