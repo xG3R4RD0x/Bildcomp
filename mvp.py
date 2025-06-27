@@ -358,12 +358,22 @@ class Vid:
                 (frame.v, self.quantization_v_interval, self.frame_width // 2, self.frame_height // 2),
             ]
             for (c, quantization_interval, width, height) in components:
+                # for block_y in range(blocks_per_column):
+                #     for block_x in range(blocks_per_row):
+                #         # block_index = (block_y * blocks_per_row) + block_x
+                #         byte_offset = (block_y * blocks_per_row * BLOCK_SIZE[0] * BLOCK_SIZE[1]) + (block_x * BLOCK_SIZE[0])
+                #         c_transformed = discrete_cosine_transform_2d(BLOCK_SIZE[0], BLOCK_SIZE[1], width, c[byte_offset:])
+                #         c_abs_max = max(abs(x) for x in c_transformed)
+
+                #         c_quantized = [quantize_value(x, c_abs_max, quantization_levels) for x in c_transformed]
+                #         pass
+
                 # decorrelation
                 c_transformed = discrete_cosine_transform_2d(width, height, width, c)
 
                 # quantization
                 # TODO: min max in one iteration
-                c_abs_max = max(abs(c_transformed))
+                c_abs_max = max(abs(x) for x in c_transformed)
                 # c_max = max(c_transformed)
                 # c_min = min(c_transformed)
                 # c_abs_max = max(abs(c_max), abs(c_min))
