@@ -661,77 +661,105 @@ def huffman_codes_from_bit_lengths(bit_lengths: list[int]) -> list[int]:
 
     return codes
 
+def print_usage_and_exit():
+    args = sys.argv
+    exit(f"""Usage: python3 {args[0]} <subcommand> [options]
+
+  Available Subcommands:
+    compress   <input.yuv> <output.vid>   Compress the raw video data from the specified input.yuv file and write the resulting video to the specified output.vid file. Try to extract the metadata from the filename itself. 
+    decompress <input.vid> <output.yuv>   Read the compressed video data from the specified input.vid file. Decompress the video and write the resulting raw video data to the specified output.yuv file.
+
+  Available Options:
+    --quantization-interval <float>       Only available for the compress subcommand. Specify the desired quantization interval used for compression. We recommend a value between 1.0 and 15.0.
+    --help                                Show this help and quit.
+""")
+
 ##### main logic #####
 if __name__ == '__main__':
     args = sys.argv
-    if len(args) != 2:
-        exit(f"Usage: ./{args[0]} <filename>")
 
-    filename = args[1]
-    content = None
-    with open(filename, 'rb') as f:
-        content = f.read()
+    subcommand = None
+    input_file = None
+    output_file = None
+    quantization_interval = None
 
-    metadata = parse_raw_metadata_from_filename(filename)
+    # parse command line arguments
+    argIndex = 1 # index 0 is the program itself
+    while argIndex < len(args):
+        if args[argIndex].startswith('--'):
+            if args[argIndex] == '--help':
+                print_usage_and_exit()
+            if args[argIndex] == '--quantization-interval':
+                if (argIndex + 1) >= len(args):
+                    # error: missing argument for option --quantization-interval
+                    print_usage_and_exit()
 
-    ys_size = metadata.width * metadata.height * 1
-    us_size = metadata.width * metadata.height // 4
-    vs_size = metadata.width * metadata.height // 4
+                try:
+                    quantization_interval = float(args[argIndex + 1])
+                    argIndex += 1
+                except ValueError:
+                    exit(f"Invalid argument for --quantization-interval. Expected a number between 1.0 and 15.0 got '{args[argIndex + 1]}'")
+            else:
+                exit(f"Unexpected option: {args[argIndex]}")
+        elif subcommand is None:
+            if args[argIndex] == "compress" or args[argIndex] == "decompress":
+                subcommand = args[argIndex]
+            else:
+                print_usage_and_exit()
+        elif input_file is None:
+            input_file = args[argIndex]
+        elif output_file is None:
+            output_file = args[argIndex]
+        else:
+            exit(f"Unexpected argument: {args[argIndex]}")
 
-    frame_size = ys_size + us_size + vs_size
+        argIndex += 1
 
-    # tga_frames = []
-    frames = []
-    offset = 0
-    while len(content) - offset >= frame_size:
-        print(f"\rProcessing frame: {len(frames)}", end="")
-        ys = content[offset:offset+ys_size]
-        us = content[offset+ys_size:offset+ys_size+us_size]
-        vs = content[offset+ys_size+us_size:offset+ys_size+us_size+vs_size]
-        offset += frame_size
+    if subcommand is None or input_file is None or output_file is None:
+        print_usage_and_exit()
 
-        frame = YUVImage(metadata.width, metadata.height, ys, us, vs)
-        frames.append(frame)
-        # tga_frames.append(frame.tga_data())
 
-        # if len(frames) == 1:
-        #     occ1 = occurence_distribution(frames[0].y)
-        #     print(f"{entropy(occ1) = }")
-        #     plt.hist(frames[0].y, bins=256)
-        #     plt.show()
+    # execute the program with the given subcommand and options
+    if subcommand == "compress":
+        content = None
+        with open(input_file, 'rb') as f:
+            content = f.read()
 
-    print("")
+        metadata = parse_raw_metadata_from_filename(input_file)
 
-    # for frame in frames:
-    #     frame.save_as_tga("output.tga")
-    #     time.sleep(1 / metadata.fps)
+        ys_size = metadata.width * metadata.height * 1
+        us_size = metadata.width * metadata.height // 4
+        vs_size = metadata.width * metadata.height // 4
 
-    # tga_frames = [frame.tga_data() for frame in frames]
-    # for frame in tga_frames:
-    #     with open("output.tga", 'wb') as f:
-    #         f.write(bytes(frame))
-    #     time.sleep(1 / metadata.fps)
+        frame_size = ys_size + us_size + vs_size
 
-    print(f"{metadata.width = }")
-    print(f"{metadata.height = }")
-    print(f"{metadata.fps = }")
+        frames = []
+        offset = 0
+        while len(content) - offset >= frame_size:
+            print(f"\rProcessing frame: {len(frames)}", end="")
+            ys = content[offset:offset+ys_size]
+            us = content[offset+ys_size:offset+ys_size+us_size]
+            vs = content[offset+ys_size+us_size:offset+ys_size+us_size+vs_size]
+            offset += frame_size
 
-    vid = Vid(metadata.fps, metadata.width, metadata.height, frames)
-    vid.save_to_file("output.vid")
+            frame = YUVImage(metadata.width, metadata.height, ys, us, vs)
+            frames.append(frame)
 
-    vid = Vid.read_from_file("output.vid")
+        print("")
 
-    with open('output/output.yuv', 'wb') as f:
-        for frame in vid.frames:
-            f.write(frame.y)
-            f.write(frame.u)
-            f.write(frame.v)
+        vid = Vid(metadata.fps, metadata.width, metadata.height, frames)
+        if quantization_interval is not None:
+            vid.quantization_y_interval = quantization_interval
+            vid.quantization_u_interval = quantization_interval
+            vid.quantization_v_interval = quantization_interval
+        vid.save_to_file(output_file)
+    elif subcommand == "decompress":
+        vid = Vid.read_from_file(input_file)
 
-    # import time
-    # frames = vid.frames
-    # assert len(frames) > 0
-    # tga_frames = [frame.tga_data() for frame in frames]
-    # for frame in tga_frames:
-    #     with open("output.tga", 'wb') as f:
-    #         f.write(bytes(frame))
-    #     time.sleep(1 / vid.fps)
+        with open(output_file, 'wb') as f:
+            for frame in vid.frames:
+                f.write(frame.y)
+                f.write(frame.u)
+                f.write(frame.v)
+    else:
+        assert False, "Invalid subcommand. This should never happen."
