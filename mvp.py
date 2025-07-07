@@ -4,7 +4,15 @@ import sys
 from typing import Dict, Self, Tuple
 from os.path import basename
 
-from numba import njit
+try:
+    from numba import njit
+except ModuleNotFoundError:
+    print("Info: You do not seem to have numba installed on your system. This program will work without it, but it may be significantly slower.")
+
+    def njit(func):
+        def wrapper(*args, **kwargs):
+            return func(*args, **kwargs)
+        return wrapper
 
 ##### configuration settings #####
 
