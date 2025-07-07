@@ -60,7 +60,7 @@ class Video:
 
             t_start = time.time()
             frame_size = self.width * self.height * 3 // 2  # YUV420p
-            frames, bits_per_frame = mvp.load_vid_file_in_player(self.path)
+            frames, bits_per_frame = mvp.decompress(self.path)
             self.bitrate_per_frame = bits_per_frame
 
             for frame in frames:
@@ -412,7 +412,7 @@ class Player:
                     if output_filepath:
                         t_start = time.time()
                         print("Compressing...")
-                        mvp.main(video_to_save.path, output_filepath, self.quantization_level)
+                        mvp.compress_and_save_to_file(video_to_save.path, output_filepath, self.quantization_level)
                         t_end = time.time()
                         print(f"Encoding time: {t_end - t_start:.8f} seconds")
             elif comp_dialog.result == list_of_comps[1]: # prediction
@@ -427,7 +427,7 @@ class Player:
                         print("Compressing...")
                         cf = CompressorFinal()
                         cf.compress_video(video_path=video_to_save.path, output_path=output_filepath, height= video_to_save.height, width=video_to_save.width, block_size=8, levels=self.quantization_level)
-                        #mvp.main(video_to_save.path, output_filepath, self.quantization_level)
+                        #mvp.compress_and_save_to_file(video_to_save.path, output_filepath, self.quantization_level)
                         t_end = time.time()
                         print(f"Encoding time: {t_end - t_start:.8f} seconds")
         else: 
