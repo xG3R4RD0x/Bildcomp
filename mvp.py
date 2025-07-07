@@ -669,6 +669,46 @@ def print_usage_and_exit():
     --help                                Show this help and quit.
 """)
 
+def compress_and_save_to_file(input_file_yuv: str, output_file_vid: str, quantization_interval: int | None = None):
+    content = None
+    with open(input_file, 'rb') as f:
+        content = f.read()
+
+    metadata = parse_raw_metadata_from_filename(input_file_yuv)
+
+    ys_size = metadata.width * metadata.height * 1
+    us_size = metadata.width * metadata.height // 4
+    vs_size = metadata.width * metadata.height // 4
+
+    frame_size = ys_size + us_size + vs_size
+
+    frames = []
+    offset = 0
+    while len(content) - offset >= frame_size:
+        print(f"\rProcessing frame: {len(frames)}", end="")
+        ys = content[offset:offset+ys_size]
+        us = content[offset+ys_size:offset+ys_size+us_size]
+        vs = content[offset+ys_size+us_size:offset+ys_size+us_size+vs_size]
+        offset += frame_size
+
+        frame = YUVImage(metadata.width, metadata.height, ys, us, vs)
+        frames.append(frame)
+
+    print("")
+
+    vid = Vid(metadata.fps, metadata.width, metadata.height, frames)
+    if quantization_interval is not None:
+        vid.quantization_y_interval = quantization_interval
+        vid.quantization_u_interval = quantization_interval
+        vid.quantization_v_interval = quantization_interval
+    vid.save_to_file(output_file_vid)
+
+def decompress(input_file_vid: str) -> Tuple[list[YUVImage], list[int]]:
+    vid = Vid.read_from_file(input_file_vid)
+    frames = vid.frames
+    frame_bit_lengths = [] # TODO: implement bit lengths for GUI
+    return frames, frame_bit_lengths
+
 ##### main logic #####
 if __name__ == '__main__':
     args = sys.argv
@@ -716,43 +756,11 @@ if __name__ == '__main__':
 
     # execute the program with the given subcommand and options
     if subcommand == "compress":
-        content = None
-        with open(input_file, 'rb') as f:
-            content = f.read()
-
-        metadata = parse_raw_metadata_from_filename(input_file)
-
-        ys_size = metadata.width * metadata.height * 1
-        us_size = metadata.width * metadata.height // 4
-        vs_size = metadata.width * metadata.height // 4
-
-        frame_size = ys_size + us_size + vs_size
-
-        frames = []
-        offset = 0
-        while len(content) - offset >= frame_size:
-            print(f"\rProcessing frame: {len(frames)}", end="")
-            ys = content[offset:offset+ys_size]
-            us = content[offset+ys_size:offset+ys_size+us_size]
-            vs = content[offset+ys_size+us_size:offset+ys_size+us_size+vs_size]
-            offset += frame_size
-
-            frame = YUVImage(metadata.width, metadata.height, ys, us, vs)
-            frames.append(frame)
-
-        print("")
-
-        vid = Vid(metadata.fps, metadata.width, metadata.height, frames)
-        if quantization_interval is not None:
-            vid.quantization_y_interval = quantization_interval
-            vid.quantization_u_interval = quantization_interval
-            vid.quantization_v_interval = quantization_interval
-        vid.save_to_file(output_file)
+        compress_and_save_to_file(input_file, output_file, quantization_interval)
     elif subcommand == "decompress":
-        vid = Vid.read_from_file(input_file)
-
+        frames, lengths = decompress(input_file)
         with open(output_file, 'wb') as f:
-            for frame in vid.frames:
+            for frame in frames:
                 f.write(frame.y)
                 f.write(frame.u)
                 f.write(frame.v)
