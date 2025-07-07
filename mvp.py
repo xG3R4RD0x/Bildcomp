@@ -172,15 +172,9 @@ class YUVImage:
             pos_y = i // self.width
             pos_y = self.height - pos_y - 1
 
-            # print(len(self.u), pos_x // 2 + pos_y // 2 * self.width // 2)
-
             i_y = self.y[pos_y * self.width + pos_x]
             i_u = self.u[pos_x // 2 + pos_y // 2 * self.width // 2]
             i_v = self.v[pos_x // 2 + pos_y // 2 * self.width // 2]
-
-            # i_y = i_y / 8 * 8;
-            # i_u = (i_u - 128) / 8 * 8 + 128;
-            # i_v = (i_v - 128) / 8 * 8 + 128;
 
             y = i_y
             u = i_u
@@ -214,15 +208,9 @@ class YUVImage:
             pos_y = i // self.width
             pos_y = self.height - pos_y - 1
 
-            # print(len(self.u), pos_x // 2 + pos_y // 2 * self.width // 2)
-
             i_y = self.y[pos_y * self.width + pos_x]
             i_u = self.u[pos_x // 2 + pos_y // 2 * self.width // 2]
             i_v = self.v[pos_x // 2 + pos_y // 2 * self.width // 2]
-
-            # i_y = i_y / 8 * 8;
-            # i_u = (i_u - 128) / 8 * 8 + 128;
-            # i_v = (i_v - 128) / 8 * 8 + 128;
 
             y = i_y
             u = i_u
@@ -326,7 +314,6 @@ class Vid:
 
             dequantized_data = []
             for i in range(width * height):
-                # print(f"reading y value: {i} of {width * height}")
                 quantized_value = bitreader.read_huffman(sorted_bitlength_set, bitlengths, huffman_codes)
                 dequantized_value = quantized_value - (quantization_levels // 2)
                 dequantized_value *= quantization_interval
@@ -335,7 +322,6 @@ class Vid:
             data = inverse_discrete_cosine_transform_2d(width, height, width, dequantized_data)
             return bytes(data)
 
-        # print(self.frame_width, self.frame_height, self.frame_width * self.frame_height)
         while y_data := read_frame_data(bitreader, self.frame_width, self.frame_height):
             u_data = read_frame_data(bitreader, self.frame_width // 2, self.frame_height // 2)
             assert u_data is not None
@@ -343,7 +329,6 @@ class Vid:
             assert v_data is not None
 
             frame = YUVImage(self.frame_width, self.frame_height, y_data, u_data, v_data)
-            # frame.save_as_tga('output.tga')
 
             self.frames.append(frame)
             print(f"Decoding frame: {len(self.frames)}\r", end='')
@@ -603,12 +588,13 @@ def entropy(occurences: list[int]) -> float:
 
 def huffman_coding_length_limited(sorted_occurenes: list[int], max_bits: int) -> list[int]:
     # package-merge algorithm
-    # TODO: add reference to paper + useful explanations
+    #   original paper: https://dl.acm.org/doi/10.1145/79147.79150
+    #   helpful (at least to me) blog post: https://experiencestack.co/length-limited-huffman-codes-21971f021d43
 
-    # assert not any(x == 0 for x in sorted_occurenes)
-    # assert max_bits > 0
-    # assert len(sorted_occurenes) > 1
-    # assert (1 << max_bits) >= len(sorted_occurenes)
+    assert not any(x == 0 for x in sorted_occurenes)
+    assert max_bits > 0
+    assert len(sorted_occurenes) > 1
+    assert (1 << max_bits) >= len(sorted_occurenes)
 
     initial_packages: list[Tuple[int, list[int]]] = []
     for i, occ in enumerate(sorted_occurenes):
