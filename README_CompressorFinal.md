@@ -6,59 +6,64 @@
 
 ## Pipeline-Schritte
 
-### 1. Prädiktion
+### 1. Prädiktion (Vorhersage)
 
-Für jeden Block eines Frames wird zunächst eine Prädiktion durchgeführt. Hierbei wird der beste Prädiktionsmodus für den Block gesucht (`find_best_mode_and_residuals_float`). Das Ziel ist es, die Redundanz im Bild zu reduzieren, indem vorhersehbare Bildinhalte durch Residuen ersetzt werden.
+Bei der Prädiktion wird für jeden Block eines Bildes versucht, dessen Werte möglichst genau aus bereits bekannten Nachbarblöcken vorherzusagen. Dazu werden verschiedene Prädiktionsmodi getestet (z.B. Mittelwert, vertikale oder horizontale Fortsetzung), und der Modus mit dem geringsten Fehler wird gewählt (`find_best_mode_and_residuals_float`). Das Ergebnis ist ein Residualblock, der die Differenz zwischen dem Originalblock und der Vorhersage enthält. Diese Residuen sind oft kleiner und weisen weniger Varianz auf als die Originaldaten, was die nachfolgende Kompression deutlich effizienter macht.
 
+- **Theorie:** Prädiktion reduziert Redundanz, indem sie Korrelationen zwischen benachbarten Bildbereichen ausnutzt. Intra-Frame-Prädiktion ist ein zentrales Element moderner Videocodecs (z.B. H.264, HEVC).
 - **Eingabe:** Block aus dem aktuellen Frame
-- **Ausgabe:** Residualblock und Modus-Flag
+- **Ausgabe:** Residualblock (Differenzblock) und Modus-Flag
 
-### 2. Transformation (DCT)
+### 2. Transformation (Diskrete Kosinustransformation, DCT)
 
-Der Residualblock wird mittels diskreter Kosinustransformation (DCT) in den Frequenzbereich transformiert (`dct_block`). Dies ermöglicht eine effizientere Kompression, da viele Koeffizienten nach der Transformation nahe Null liegen.
+Die diskrete Kosinustransformation (DCT) wandelt den Residualblock aus dem Ortsraum in den Frequenzraum um (`dct_block`). Dabei werden die Bilddaten als Summe von Kosinusfunktionen unterschiedlicher Frequenzen dargestellt. In natürlichen Bildern konzentriert sich die Energie meist auf wenige niederfrequente Koeffizienten, während hochfrequente Anteile (z.B. feines Rauschen) oft sehr klein sind oder ganz entfallen.
 
+- **Theorie:** Die DCT ist eine lineare Transformation, die besonders gut für Bild- und Videokompression geeignet ist, da sie die Energie kompakt auf wenige Koeffizienten verteilt (Energiekompaktheit).
 - **Eingabe:** Residualblock
-- **Ausgabe:** DCT-Koeffizienten
+- **Ausgabe:** DCT-Koeffizienten (Frequenzanteile)
 
 ### 3. Quantisierung
 
-Die DCT-Koeffizienten werden quantisiert (`quantize`). Dabei werden Werte auf eine reduzierte Anzahl von Stufen abgebildet, was zu Datenverlust, aber auch zu einer starken Reduktion der Datenmenge führt.
+Die Quantisierung reduziert die Präzision der DCT-Koeffizienten, indem sie auf eine endliche Anzahl von Stufen abgebildet werden (`quantize`). Dies geschieht durch Division durch eine Schrittweite und anschließendes Runden. Die Quantisierung ist der Hauptgrund für den Datenverlust in der Pipeline, ermöglicht aber eine drastische Reduktion der Datenmenge, da viele kleine Koeffizienten auf Null fallen.
 
+- **Theorie:** Quantisierung ist ein verlustbehafteter Schritt, der unwichtige Details entfernt und die Kompressionseffizienz erhöht. Die Wahl der Quantisierungsstärke beeinflusst direkt die Bildqualität und die Kompressionsrate.
 - **Eingabe:** DCT-Koeffizienten
 - **Ausgabe:** Quantisierte Werte, Minimum, Schrittweite
 
-### 4. Block-Rekonstruktion
+### 4. Block-Rekonstruktion und Ersetzung
 
-Nach der Quantisierung werden die Blöcke dequantisiert und per inverser DCT zurücktransformiert (`idct_block`). Anschließend wird die inverse Prädiktion angewendet (`_decode_block_float`), um den Block zu rekonstruieren. Der rekonstruierte Block ersetzt im gepaddeten Frame den Originalblock, sodass zukünftige Prädiktionen auf bereits rekonstruierten Daten basieren.
+Nach der Quantisierung werden die Werte dequantisiert und per inverser DCT zurück in den Ortsraum transformiert (`idct_block`). Anschließend wird die inverse Prädiktion angewendet (`_decode_block_float`), um den ursprünglichen Block möglichst genau zu rekonstruieren. **Wichtig:** Der rekonstruierte Block ersetzt im gepaddeten Frame den Originalblock. Dadurch basieren alle nachfolgenden Prädiktionen auf bereits komprimierten und dekomprimierten (also "verlustbehafteten") Daten, nicht auf den Originaldaten. Dies entspricht dem Vorgehen in modernen Videocodecs und verhindert Fehlerakkumulation zwischen Encoder und Decoder.
 
+- **Theorie:** Die Ersetzung des Originalblocks durch den rekonstruierten Block stellt sicher, dass Encoder und Decoder stets mit denselben Referenzdaten arbeiten. So bleibt die Prädiktion konsistent und es entstehen keine Driftfehler.
 - **Eingabe:** Quantisierte Werte, Modus-Flag, Min, Schrittweite
 - **Ausgabe:** Rekonstruierter Block
 
 ### 5. Huffman-Codierung
 
-Die quantisierten Blöcke werden blockweise Huffman-codiert (`huffman_encode_frame`). Für jeden Frame und Kanal (Y, U, V) werden die Blöcke, die Huffman-Tabelle, Padding-Informationen und weitere Metadaten gespeichert.
+Die quantisierten Blöcke werden blockweise mit Huffman-Codierung komprimiert (`huffman_encode_frame`). Huffman-Codierung ist ein verlustfreies, entropiebasiertes Verfahren, das häufig vorkommenden Symbolen kurze Codes und seltenen Symbolen längere Codes zuweist. Für jeden Frame und Kanal (Y, U, V) werden die codierten Blöcke, die Huffman-Tabelle, Padding-Informationen und weitere Metadaten gespeichert.
 
+- **Theorie:** Die Huffman-Codierung nutzt die statistische Verteilung der Werte, um die durchschnittliche Bitrate zu minimieren. Sie ist optimal für bekannte Symbolwahrscheinlichkeiten und wird in vielen Bild- und Videocodecs eingesetzt.
 - **Eingabe:** Quantisierte Blöcke
 - **Ausgabe:** Huffman-codierte Daten, Huffman-Tabelle, Metadaten
 
-## Zusammenfassung des Ablaufs
+## Ablauf der Kompression im Detail
 
 1. **Frame wird in Y, U, V-Kanäle zerlegt**
-2. **Jeder Kanal wird in Blöcke unterteilt und gepaddet**
+2. **Jeder Kanal wird in Blöcke unterteilt und ggf. gepaddet**
 3. **Für jeden Block:**
-   - Prädiktion → Residualbildung
-   - DCT → Frequenzbereich
-   - Quantisierung → Datenreduktion
-   - Dequantisierung & IDCT → Rücktransformation
-   - Inverse Prädiktion → Block-Rekonstruktion
-   - Ersetze Originalblock im Frame durch rekonstruierten Block
+   - Prädiktion: Vorhersage aus Nachbarblöcken, Berechnung des Residuals
+   - DCT: Transformation des Residuals in den Frequenzraum
+   - Quantisierung: Reduktion der Präzision, viele Werte werden Null
+   - Dequantisierung & IDCT: Rücktransformation in den Ortsraum
+   - Inverse Prädiktion: Rekonstruktion des Blocks
+   - **Ersetze Originalblock im Frame durch den rekonstruierten Block** (wichtig für Konsistenz der Prädiktion)
 4. **Huffman-Codierung der quantisierten Blöcke**
 5. **Speichern aller Metadaten und komprimierten Daten**
 
 ## Dekompression
 
-Die Dekompression läuft in umgekehrter Reihenfolge ab: Huffman-Dekodierung, inverse Quantisierung, IDCT, inverse Prädiktion und Zusammenbau der YUV-Frames.
+Die Dekompression läuft in umgekehrter Reihenfolge ab: Zunächst werden die Huffman-codierten Daten dekodiert, dann die Werte dequantisiert, per inverser DCT zurücktransformiert und schließlich mit der inversen Prädiktion die Blöcke rekonstruiert. Die rekonstruierten Blöcke werden zu vollständigen YUV-Frames zusammengesetzt.
 
 ---
 
-**Hinweis:** Die gesamte Pipeline ist so gestaltet, dass sie blockweise arbeitet und die Prädiktion stets auf bereits rekonstruierten Blöcken basiert, was für eine effiziente und konsistente Kompression sorgt.
+**Hinweis:** Die gesamte Pipeline arbeitet blockweise und stellt durch die Ersetzung des Originalblocks mit dem rekonstruierten Block sicher, dass sowohl Encoder als auch Decoder immer auf denselben (verlustbehafteten) Referenzdaten aufbauen. Dies ist entscheidend für die Effizienz und Konsistenz der Kompression und entspricht dem Vorgehen moderner Videocodecs.
