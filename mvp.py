@@ -379,9 +379,9 @@ class Vid:
                 blocks_per_column = (height + BLOCK_SIZE[1] - 1) // BLOCK_SIZE[1]
 
                 for block_y in range(blocks_per_column):
-                    byte_offset = byte_offset_y 
                     for block_x in range(blocks_per_row):
-                        
+                        byte_offset = (block_y * blocks_per_row * BLOCK_SIZE[0] * BLOCK_SIZE[1]) + (block_x * BLOCK_SIZE[0])
+
                         # decorrelation
                         # TODO: implement prediction
                         c_block_width = min(BLOCK_SIZE[0], width - BLOCK_SIZE[0] * block_x)
@@ -403,9 +403,6 @@ class Vid:
 
                                 # for prediction
                                 frame_reconstructed[dest_offset] = c_inverse_transformed[src_offset]
-                        byte_offset += BLOCK_SIZE[0] # jump to next block in same row
-                    # jump to next block row
-                    byte_offset_y += byte_stride
 
                 # quantization
                 quantized_max = max(abs(x) for x in frame_quantized)
