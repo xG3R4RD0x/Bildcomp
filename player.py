@@ -26,13 +26,14 @@ class Video:
         self.width, self.height = int(dims[0]), int(dims[1])
 
         frame_size = self.width * self.height * 3 // 2  # YUV420p
+        ds = DecorrelationStage()
 
         with open(self.path, "rb") as f:
             while True:
                 data = f.read(frame_size)
                 if len(data) < frame_size:
                     break
-                components = DecorrelationStage.separate_yuv(data, self.width, self.height)
+                components = ds.separate_yuv(data, self.width, self.height)
                 rgb = components["rgb"]
                 img = Image.fromarray(rgb, "RGB")
                 self.frames.append(img)

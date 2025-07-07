@@ -90,3 +90,14 @@ class BlockDCT:
         # por lo tanto, redondeo el resultado para que sea un entero
         # y lo devuelvo como uint8
         return np.round(result).astype(np.uint8)
+    
+    def process_block_dct(self, block, cosines, block_size):
+        """
+        Apply DCT to a single block of size block_size x block_size.
+        """
+        return dct_block(block, cosines, block_size)
+    def process_block_idct(self, block, cosines, block_size):
+        """
+        Apply IDCT to a single block of size block_size x block_size.
+        """
+        return idct_block(block, cosines, block_size)
