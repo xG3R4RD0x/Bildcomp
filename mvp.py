@@ -726,12 +726,6 @@ def compress_and_save_to_file(input_file_yuv: str, output_file_vid: str, quantiz
         vid.quantization_v_interval = quantization_interval
     vid.save_to_file(output_file_vid)
 
-def decompress(input_file_vid: str) -> Tuple[list[YUVImage], list[int]]:
-    vid = Vid.read_from_file(input_file_vid)
-    frames = vid.frames
-    frame_bit_lengths = vid.frame_bit_length
-    return frames, frame_bit_lengths
-
 ##### main logic #####
 if __name__ == '__main__':
     args = sys.argv
@@ -781,9 +775,9 @@ if __name__ == '__main__':
     if subcommand == "compress":
         compress_and_save_to_file(input_file, output_file, quantization_interval)
     elif subcommand == "decompress":
-        frames, lengths = decompress(input_file)
+        vid: Vid = Vid.read_from_file(input_file)
         with open(output_file, 'wb') as f:
-            for frame in frames:
+            for frame in vid.frames:
                 f.write(frame.y)
                 f.write(frame.u)
                 f.write(frame.v)

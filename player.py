@@ -55,12 +55,12 @@ class Video:
             print(f"Decoding time: {t_end - t_start:.8f} seconds")
         elif self.path.endswith(".vid"): 
             ''' VID file handling '''
-            dims = self.path.split(".", 1)[0].split("_")[-1].split("x")
-            self.width, self.height = int(dims[0]), int(dims[1])
-
             t_start = time.time()
-            frame_size = self.width * self.height * 3 // 2  # YUV420p
-            frames, bits_per_frame = mvp.decompress(self.path)
+            vid = mvp.Vid.read_from_file(self.path)
+            self.width = vid.frame_width
+            self.height = vid.frame_height
+            frames = vid.frames
+            bits_per_frame = vid.frame_bit_length
             self.bitrate_per_frame = bits_per_frame
 
             for frame in frames:
