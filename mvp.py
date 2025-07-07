@@ -64,6 +64,7 @@ class BitReader:
     significant_bits: int = 0
     input_bytes: bytes
     byte_offset: int = 0
+    total_bits_read: int = 0
 
     def __init__(self, data: bytes):
         self.input_bytes = data
@@ -72,6 +73,7 @@ class BitReader:
         bits = self.peek(num_bits)
         self.current_value &= ((1 << (self.significant_bits - num_bits)) - 1)
         self.significant_bits -= num_bits
+        self.total_bits_read += num_bits
         return bits
 
     def peek(self, num_bits: int) -> int | None:
@@ -266,17 +268,19 @@ class Vid:
     quantization_v_interval: float
 
     frames: list[YUVImage]
+    frame_bit_length: list[int]
 
-    def __init__(self, fps: int, frame_width: int, frame_height: int, frames: list[YUVImage]) -> Self:
+    def __init__(self, fps: int, frame_width: int, frame_height: int, frames: list[YUVImage], quantization_interval: float = 10.0) -> Self:
         self.fps = fps
         self.frame_width = frame_width
         self.frame_height = frame_height
 
-        self.quantization_y_interval = 10.0
-        self.quantization_u_interval = 10.0
-        self.quantization_v_interval = 10.0
+        self.quantization_y_interval = quantization_interval
+        self.quantization_u_interval = quantization_interval
+        self.quantization_v_interval = quantization_interval
 
         self.frames = frames
+        self.frame_bit_length = []
 
     def read_from_file(filename: str) -> Self:
         content = None
@@ -322,12 +326,21 @@ class Vid:
             data = inverse_discrete_cosine_transform_2d(width, height, width, dequantized_data)
             return bytes(data)
 
-        while y_data := read_frame_data(bitreader, self.frame_width, self.frame_height):
+        while True:
+            bits_before = bitreader.total_bits_read
+
+            y_data = read_frame_data(bitreader, self.frame_width, self.frame_height)
+            if y_data is None:
+                break
+
             u_data = read_frame_data(bitreader, self.frame_width // 2, self.frame_height // 2)
             assert u_data is not None
             v_data = read_frame_data(bitreader, self.frame_width // 2, self.frame_height // 2)
             assert v_data is not None
 
+            bits_after = bitreader.total_bits_read
+            bits_this_frame = bits_after - bits_before
+            self.frame_bit_length.append(bits_this_frame)
             frame = YUVImage(self.frame_width, self.frame_height, y_data, u_data, v_data)
 
             self.frames.append(frame)
@@ -366,9 +379,9 @@ class Vid:
                 blocks_per_column = (height + BLOCK_SIZE[1] - 1) // BLOCK_SIZE[1]
 
                 for block_y in range(blocks_per_column):
+                    byte_offset = byte_offset_y 
                     for block_x in range(blocks_per_row):
-                        byte_offset = (block_y * blocks_per_row * BLOCK_SIZE[0] * BLOCK_SIZE[1]) + (block_x * BLOCK_SIZE[0])
-
+                        
                         # decorrelation
                         # TODO: implement prediction
                         c_block_width = min(BLOCK_SIZE[0], width - BLOCK_SIZE[0] * block_x)
@@ -390,6 +403,9 @@ class Vid:
 
                                 # for prediction
                                 frame_reconstructed[dest_offset] = c_inverse_transformed[src_offset]
+                        byte_offset += BLOCK_SIZE[0] # jump to next block in same row
+                    # jump to next block row
+                    byte_offset_y += byte_stride
 
                 # quantization
                 quantized_max = max(abs(x) for x in frame_quantized)
@@ -485,9 +501,15 @@ def discrete_cosine_transform_block(stride: int, data: list[int], data_width: in
 
     # transform horizontally
     N = BLOCK_SIZE[0]
+    offset_y = 0
+    block_y = 0
     for y in range(BLOCK_SIZE[1]):
         for k in range(N):
-            C0 = SQRT2_REPRO if k == 0 else 1
+            #C0 = SQRT2_REPRO if k == 0 else 1
+            if k == 0:
+                C0 = SQRT2_REPRO 
+            else:
+                C0 = 1
 
             summed_xs = 0
             for x in range(BLOCK_SIZE[0]):
@@ -498,7 +520,10 @@ def discrete_cosine_transform_block(stride: int, data: list[int], data_width: in
                 summed_xs += data[offset] * math.cos((2 * n + 1) * math.pi * k / (2 * N))
 
             X = C0 * SQRT2_OVER_BLOCK_WIDTH * summed_xs
-            block[y * BLOCK_SIZE[0] + k] = X
+            #block[y * BLOCK_SIZE[0] + k] = X
+            block[block_y + k] = X
+        block_y += BLOCK_SIZE[0]
+        offset_y += stride
 
     # transform vertically
     N = BLOCK_SIZE[1]
@@ -507,14 +532,15 @@ def discrete_cosine_transform_block(stride: int, data: list[int], data_width: in
             C0 = SQRT2_REPRO if k == 0 else 1
 
             summed_xs = 0
+            offset = x
             for y in range(BLOCK_SIZE[1]):
-                offset = (y * BLOCK_SIZE[0]) + x
                 n = y
                 summed_xs += block[offset] * math.cos((2 * n + 1) * math.pi * k / (2 * N))
+                offset += BLOCK_SIZE[0]
 
             X = C0 * SQRT2_OVER_BLOCK_HEIGHT * summed_xs
-            offset = (k * BLOCK_SIZE[0]) + x # NOTE: we are intentionally using k and width instead of stride, because this is in terms of the output coefficients
-            transformed[offset] = X
+            offset_target = (k * BLOCK_SIZE[0]) + x # NOTE: we are intentionally using k and width instead of stride, because this is in terms of the output coefficients
+            transformed[offset_target] = X
 
     return transformed
 
@@ -706,7 +732,7 @@ def compress_and_save_to_file(input_file_yuv: str, output_file_vid: str, quantiz
 def decompress(input_file_vid: str) -> Tuple[list[YUVImage], list[int]]:
     vid = Vid.read_from_file(input_file_vid)
     frames = vid.frames
-    frame_bit_lengths = [] # TODO: implement bit lengths for GUI
+    frame_bit_lengths = vid.frame_bit_length
     return frames, frame_bit_lengths
 
 ##### main logic #####
