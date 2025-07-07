@@ -32,7 +32,7 @@ class CompressorFinalTest(unittest.TestCase):
             height=self.height,
             width=self.width,
             block_size=8,
-            levels=32,
+            levels=16,
         )
 
         # Check if the compressed file exists

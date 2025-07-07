@@ -1,119 +1,132 @@
-# from pipeline.interfaces.base_stage import CompressionStage
-# from pipeline.interfaces.bitwriter import BitWriter, BitReader
-# import math
-# from typing import Dict, Tuple
 
+import numpy as np
+import heapq
+from collections import Counter, namedtuple
 
-# class HuffmannCoding(CompressionStage):
-#     def name(self) -> str:
-#         return "Huffman Coding Stage"
+class HuffmanNode(namedtuple('HuffmanNode', ['symbol', 'freq', 'left', 'right'])):
+    def __lt__(self, other):
+        return self.freq < other.freq
 
-#     def occurence_distribution(self, data: list[int]) -> Dict[int, int]:
-#         occurences = dict()
-#         for x in data:
-#             if x not in occurences:
-#                 occurences[x] = 1
-#             else:
-#                 occurences[x] += 1
-#         return occurences
+def build_huffman_tree(symbols):
+    # symbols: 1D np.ndarray or list of ints
+    freq = Counter(symbols)
+    heap = [HuffmanNode(sym, f, None, None) for sym, f in freq.items()]
+    heapq.heapify(heap)
+    if len(heap) == 1:
+        # Only one symbol: assign code '0'
+        node = heap[0]
+        return HuffmanNode(None, node.freq, node, None)
+    while len(heap) > 1:
+        left = heapq.heappop(heap)
+        right = heapq.heappop(heap)
+        merged = HuffmanNode(None, left.freq + right.freq, left, right)
+        heapq.heappush(heap, merged)
+    return heap[0]
 
-#     def huffman_coding_length_limited(self, sorted_occurenes: list[int], max_bits: int) -> list[int]:
-#         initial_packages: list[Tuple[int, list[int]]] = []
-#         for i, occ in enumerate(sorted_occurenes):
-#             initial_packages.append((occ, [i]))
-#         initial_packages = sorted(initial_packages, key=lambda p: (p[0], -len(p[1])))
-#         packages = initial_packages.copy()
-#         for _ in range(max_bits - 1):
-#             new_packages = []
-#             for i in range(len(packages) // 2):
-#                 p0 = packages[i * 2 + 0]
-#                 p1 = packages[i * 2 + 1]
-#                 items = []
-#                 items.extend(p0[1])
-#                 items.extend(p1[1])
-#                 p0p1 = (p0[0] + p1[0], items)
-#                 new_packages.append(p0p1)
-#             packages = new_packages + initial_packages
-#             packages = sorted(packages, key=lambda p: (p[0], -len(p[1])))
-#         num_packages = 2 * len(sorted_occurenes) - 2
-#         symbols = [p[1] for p in packages[:num_packages]]
-#         symbols_flattened = [s for syms in symbols for s in syms]
-#         bit_lengths = []
-#         for i in range(len(sorted_occurenes)):
-#             bit_lengths.append(symbols_flattened.count(i))
-#         return bit_lengths
+def build_huffman_table(tree):
+    # Returns {symbol: bitstring}
+    table = {}
+    def _walk(node, code):
+        if node.left is None and node.right is None:
+            table[node.symbol] = code or '0'
+            return
+        if node.left:
+            _walk(node.left, code + '0')
+        if node.right:
+            _walk(node.right, code + '1')
+    _walk(tree, '')
+    return table
 
-#     def huffman_codes_from_bit_lengths(self, bit_lengths: list[int]) -> list[int]:
-#         MAX_BITS = max(bit_lengths) if bit_lengths else 0
-#         bl_count = [bit_lengths.count(i) for i in range(0, MAX_BITS)]
-#         next_code = [0]
-#         if bl_count:
-#             bl_count[0] = 0
-#         code = 0
-#         for bits in range(1, MAX_BITS + 1):
-#             code = (code + bl_count[bits - 1]) << 1
-#             next_code.append(code)
-#         codes = []
-#         for length in bit_lengths:
-#             if length != 0:
-#                 codes.append(next_code[length])
-#                 next_code[length] += 1
-#             else:
-#                 codes.append(0)
-#         return codes
+def encode_symbols(symbols, table):
+    # symbols: 1D np.ndarray or list of ints
+    # table: {symbol: bitstring}
+    bitstring = ''.join(table[sym] for sym in symbols)
+    # Pack bits into bytes
+    n = 8
+    pad = (n - len(bitstring) % n) % n
+    bitstring += '0' * pad
+    b = bytearray()
+    for i in range(0, len(bitstring), n):
+        b.append(int(bitstring[i:i+n], 2))
+    return bytes(b), pad
 
-#     def process(self, data: bytes, decode: bool = False) -> bytes:
-#         if not decode:
-#             # ENCODING
-#             data_list = list(data)
-#             occurences = self.occurence_distribution(data_list)
-#             symbols = sorted(occurences.keys())
-#             symbol_counts = [occurences[s] for s in symbols]
-#             # Build Huffman tree (length-limited)
-#             bitlengths = self.huffman_coding_length_limited(symbol_counts, 15)
-#             # Map bitlengths to all possible byte values (0-255)
-#             bitlengths_all = [0]*256
-#             for idx, sym in enumerate(symbols):
-#                 bitlengths_all[sym] = bitlengths[idx]
-#             codes = self.huffman_codes_from_bit_lengths(bitlengths_all)
-#             # Write header: store bitlengths for all 256 symbols (1 byte each)
-#             header = bytes(bitlengths_all)
-#             # Encode data
-#             writer = BitWriter()
-#             for b in data_list:
-#                 length = bitlengths_all[b]
-#                 code = codes[b]
-#                 writer.write(code, length)
-#             writer.flush()
-#             return header + writer.output_bytes
-#         else:
-#             # DECODING
-#             bitlengths_all = list(data[:256])
-#             codes = self.huffman_codes_from_bit_lengths(bitlengths_all)
-#             # Build decoding table: (length, code) -> symbol
-#             decode_table = {}
-#             for symbol, length in enumerate(bitlengths_all):
-#                 if length != 0:
-#                     code = codes[symbol]
-#                     decode_table[(length, code)] = symbol
-#             # Prepare to decode
-#             reader = BitReader(data[256:])
-#             result = []
-#             # To know how many symbols to decode, we need to store the original length somewhere.
-#             # For demo, decode until EOF (may need to adapt for real use)
-#             try:
-#                 while True:
-#                     # Try all possible lengths (shortest first)
-#                     for l in range(1, max(bitlengths_all)+1):
-#                         code = reader.peek(l)
-#                         key = (l, code)
-#                         if key in decode_table:
-#                             reader.read(l)
-#                             result.append(decode_table[key])
-#                             break
-#                     else:
-#                         # No valid code found
-#                         break
-#             except EOFError:
-#                 pass
-#             return bytes(result)
+def decode_symbols(encoded_bytes, table, num_symbols, pad):
+    # table: {symbol: bitstring}
+    # Reverse table
+    rev_table = {v: k for k, v in table.items()}
+    # Convert bytes to bitstring
+    bitstring = ''.join(f'{byte:08b}' for byte in encoded_bytes)
+    if pad:
+        bitstring = bitstring[:-pad]
+    # Decode
+    out = []
+    code = ''
+    for bit in bitstring:
+        code += bit
+        if code in rev_table:
+            out.append(rev_table[code])
+            code = ''
+            if len(out) == num_symbols:
+                break
+    return np.array(out)
+
+def huffman_encode_frame(quantized_blocks):
+    """
+    compressed_blocks: list of np.ndarray, one per block (shape: (block_size, block_size))
+    Returns:
+        encoded_blocks: list of bytes, one per block
+        huff_table: {symbol: bitstring}
+        pads: list of int, number of padding bits per block
+        shape: (n_blocks_y, n_blocks_x, block_size)
+    """
+    # Recopila todos los valores de todos los bloques (solo los datos, no metadatos)
+    all_values = []
+    n_blocks_y = len(quantized_blocks)
+    n_blocks_x = len(quantized_blocks[0])
+    block_size = quantized_blocks[0][0].shape[0]
+    for by in range(n_blocks_y):
+        for bx in range(n_blocks_x):
+            block = quantized_blocks[by][bx] # debe ser np.ndarray (block_size, block_size)
+            all_values.extend(block.flatten())
+    all_values = np.array(all_values)
+    # Construye el árbol y la tabla de Huffman usando todos los valores
+    tree = build_huffman_tree(all_values)
+    table = build_huffman_table(tree)
+    # Codifica cada bloque usando la tabla
+    encoded_blocks = []
+    pads = []
+    for by in range(n_blocks_y):
+        for bx in range(n_blocks_x):
+            block = quantized_blocks[by][bx].flatten()
+            encoded, pad = encode_symbols(block, table)
+            encoded_blocks.append(encoded)
+            pads.append(pad)
+    # El árbol (o la tabla) debe ir como metadata del frame
+    return encoded_blocks, table, pads, (n_blocks_y, n_blocks_x, block_size)
+
+def huffman_decode_frame(encoded_blocks, table, pads, shape):
+    """
+    encoded_blocks: list of bytes, one por bloque
+    table: {symbol: bitstring}
+    pads: list of int, uno por bloque
+    shape: (n_blocks_y, n_blocks_x, block_size)
+    Returns: list de np.ndarray, uno por bloque (block_size, block_size)
+    """
+    n_blocks_y, n_blocks_x, block_size = shape
+    blocks = []
+    idx = 0
+    for by in range(n_blocks_y):
+        row = []
+        for bx in range(n_blocks_x):
+            num_symbols = block_size * block_size
+            decoded = decode_symbols(encoded_blocks[idx], table, num_symbols, pads[idx])
+            row.append(decoded.reshape((block_size, block_size)))
+            idx += 1
+        blocks.append(row)
+    return blocks
+
+# Example usage:
+# encoded_blocks, table, pads, shape = huffman_encode_frame(quantized_blocks)
+# decoded_blocks = huffman_decode_frame(encoded_blocks, table, pads, shape)
+# Huffman coding stage for entropy coding after quantization
+# Generates a Huffman table per frame and encodes quantized values blockwise

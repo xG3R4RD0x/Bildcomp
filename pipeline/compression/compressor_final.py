@@ -7,6 +7,7 @@ from pipeline.stages.decorrelation.strategy.decode_prediction_strategy import _d
 from pipeline.stages.decorrelation.strategy.prediction_strategy import _to_mode_flag, find_best_mode_and_residuals_float, find_best_mode_and_residuals_uint8
 from pipeline.stages.decorrelation.strategy.transformation_strategy import dct_block, idct_block, precompute_cosines
 from pipeline.stages.quantization.quantization_stage import dequantize, quantize
+from pipeline.stages.entropie.huffmann_codierung import huffman_encode_frame, huffman_decode_frame
 
 class CompressorFinal:
     """
@@ -70,9 +71,10 @@ class CompressorFinal:
 
     def process_video_compression(self, video_data: np.ndarray, width: int, height: int, block_size: int, levels: int, cosines: np.ndarray):
         """
-        Receives a raw YUV420 video (np.ndarray 1D uint8), splits it into frames, separates channels, and applies compress_frame_test to each channel of each frame.
-        Returns a list of compressed results per frame and channel: [[y_out, u_out, v_out], ...]
+        Receives a raw YUV420 video (np.ndarray 1D uint8), splits it into frames, separa canales, aplica compress_frame_test y luego Huffman por frame/canal.
+        Devuelve una lista de resultados comprimidos por frame y canal: [[(encoded_blocks, huff_table, pads, shape, mode_flags, min_vals, steps), ...], ...]
         """
+        from pipeline.stages.entropie.huffmann_codierung import huffman_encode_frame
         frame_size = width * height * 3 // 2
         num_frames = video_data.size // frame_size
         width_uv = width // 2
@@ -96,15 +98,25 @@ class CompressorFinal:
             y_out = compress_frame_test(y.flatten(), width, height, padded_w_y, padded_h_y, block_size, levels, cosines)
             u_out = compress_frame_test(u.flatten(), width_uv, height_uv, padded_w_uv, padded_h_uv, block_size, levels, cosines)
             v_out = compress_frame_test(v.flatten(), width_uv, height_uv, padded_w_uv, padded_h_uv, block_size, levels, cosines)
-            results.append([y_out, u_out, v_out])
+
+            # y_out, u_out, v_out: (processed_blocks, mode_flags, min_vals, steps)
+            frame_result = []
+            for out in [y_out, u_out, v_out]:
+                processed_blocks, mode_flags, min_vals, steps = out
+                # Codifica solo los processed_blocks con Huffman por frame/canal
+                blocks_array = np.array([[processed_blocks[by, bx] for bx in range(processed_blocks.shape[1])] for by in range(processed_blocks.shape[0])])
+                encoded_blocks, huff_table, pads, shape = huffman_encode_frame(blocks_array)
+                frame_result.append((encoded_blocks, huff_table, pads, shape, mode_flags, min_vals, steps))
+            results.append(frame_result)
             print(f"compressed frame {frame_idx + 1}/{num_frames}")
         return results
 
     def process_video_decompression(self, frames, width: int, height: int, num_frames: int, block_size: int, levels: int, cosines: np.ndarray):
         """
-        Receives the deserialized structure (frames) and individual metadata,
-        reconstructs the raw YUV video (np.ndarray 1D uint8).
+        Recibe la estructura deserializada (frames) y metadatos,
+        decodifica Huffman por frame/canal y reconstruye el video YUV (np.ndarray 1D uint8).
         """
+        from pipeline.stages.entropie.huffmann_codierung import huffman_decode_frame
         width_uv = width // 2
         height_uv = height // 2
         frame_size = width * height + 2 * (width_uv * height_uv)
@@ -113,9 +125,27 @@ class CompressorFinal:
         for frame_idx in range(num_frames):
             frame = frames[frame_idx]
             y_tuple, u_tuple, v_tuple = frame
-            y_rec = decompress_frame_test(y_tuple, width, height, block_size, levels, cosines)
-            u_rec = decompress_frame_test(u_tuple, width_uv, height_uv, block_size, levels, cosines)
-            v_rec = decompress_frame_test(v_tuple, width_uv, height_uv, block_size, levels, cosines)
+            # y_tuple: (encoded_blocks, huff_table, pads, shape, mode_flags, min_vals, steps)
+            y_blocks = huffman_decode_frame(y_tuple[0], y_tuple[1], y_tuple[2], y_tuple[3])
+            u_blocks = huffman_decode_frame(u_tuple[0], u_tuple[1], u_tuple[2], u_tuple[3])
+            v_blocks = huffman_decode_frame(v_tuple[0], v_tuple[1], v_tuple[2], v_tuple[3])
+            # Reconstruye processed_blocks como np.ndarray
+            def blocks_to_array(blocks):
+                n_blocks_y = len(blocks)
+                n_blocks_x = len(blocks[0])
+                block_size = blocks[0][0].shape[0]
+                arr = np.empty((n_blocks_y, n_blocks_x, block_size, block_size), dtype=np.uint8)
+                for by in range(n_blocks_y):
+                    for bx in range(n_blocks_x):
+                        arr[by, bx] = blocks[by][bx]
+                return arr
+            y_processed = blocks_to_array(y_blocks)
+            u_processed = blocks_to_array(u_blocks)
+            v_processed = blocks_to_array(v_blocks)
+            # Reconstruye el frame usando los metadatos
+            y_rec = decompress_frame_test((y_processed, y_tuple[4], y_tuple[5], y_tuple[6]), width, height, block_size, levels, cosines)
+            u_rec = decompress_frame_test((u_processed, u_tuple[4], u_tuple[5], u_tuple[6]), width_uv, height_uv, block_size, levels, cosines)
+            v_rec = decompress_frame_test((v_processed, v_tuple[4], v_tuple[5], v_tuple[6]), width_uv, height_uv, block_size, levels, cosines)
             start = frame_idx * frame_size
             output[start:start + width*height] = y_rec.flatten()
             output[start + width*height : start + width*height + width_uv*height_uv] = u_rec.flatten()
