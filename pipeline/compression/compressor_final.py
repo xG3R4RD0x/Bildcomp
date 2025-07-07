@@ -9,18 +9,46 @@ from pipeline.stages.decorrelation.strategy.transformation_strategy import dct_b
 from pipeline.stages.quantization.quantization_stage import dequantize, quantize
 from pipeline.stages.entropie.huffmann_codierung import huffman_encode_frame, huffman_decode_frame
 
+
 class CompressorFinal:
     """
     Final version of the video compressor with all features integrated.
     """
     def __init__(self):
-        pass
+        self._bitrate = None
+
+    def get_bitrate(self):
+        return self._bitrate
+
+    def set_bitrate(self, value):
+        self._bitrate = value
+
+    def calculate_and_set_bitrate_per_frame(self, encoded_blocks_yuv, width, height):
+        """
+        Calculates the bitrate (bits per pixel) for a single frame given the encoded blocks for Y, U, V.
+        Updates the internal _bitrate list (one value per frame).
+        """
+        if not hasattr(self, '_bitrate') or self._bitrate is None:
+            self._bitrate = []
+        # encoded_blocks_yuv: list/tuple of (encoded_blocks_y, encoded_blocks_u, encoded_blocks_v)
+        total_bits = sum(len(b) * 8 for b in encoded_blocks_yuv)
+        total_pixels = int(width * height * 1.5)  # YUV420
+        if total_pixels > 0:
+            bitrate = total_bits / total_pixels
+        else:
+            bitrate = 0
+        self._bitrate.append(bitrate)
+        return bitrate
+
+    def reset_bitrate(self):
+        self._bitrate = []
 
 
     def compress_video(self, video_path: str, output_path: str, height: int, width: int, block_size: int, levels: int):
         """
         Compresses a raw YUV video and saves it in binary format using BitWriter.
         """
+        self.reset_bitrate()
         reader = BitWriter(video_path)
         # Read the original video as bytes
         original_video = reader.read_original_video()
@@ -80,6 +108,7 @@ class CompressorFinal:
         width_uv = width // 2
         height_uv = height // 2
         results = []
+        self.reset_bitrate()
         for frame_idx in range(num_frames):
             frame_start = frame_idx * frame_size
             frame_end = frame_start + frame_size
@@ -101,31 +130,41 @@ class CompressorFinal:
 
             # y_out, u_out, v_out: (processed_blocks, mode_flags, min_vals, steps)
             frame_result = []
+            encoded_blocks_yuv = []
             for out in [y_out, u_out, v_out]:
                 processed_blocks, mode_flags, min_vals, steps = out
                 # Codifica solo los processed_blocks con Huffman por frame/canal
                 blocks_array = np.array([[processed_blocks[by, bx] for bx in range(processed_blocks.shape[1])] for by in range(processed_blocks.shape[0])])
                 encoded_blocks, huff_table, pads, shape = huffman_encode_frame(blocks_array)
                 frame_result.append((encoded_blocks, huff_table, pads, shape, mode_flags, min_vals, steps))
+                encoded_blocks_yuv.append(encoded_blocks)
+            # Calcular y guardar el bitrate de este frame
+            self.calculate_and_set_bitrate_per_frame(encoded_blocks_yuv, width, height)
             results.append(frame_result)
-            print(f"compressed frame {frame_idx + 1}/{num_frames}")
+            print(f"compressed frame {frame_idx + 1}/{num_frames} | bitrate: {self.get_bitrate()[-1]:.4f} bits/pixel")
         return results
 
     def process_video_decompression(self, frames, width: int, height: int, num_frames: int, block_size: int, levels: int, cosines: np.ndarray):
         """
         Recibe la estructura deserializada (frames) y metadatos,
         decodifica Huffman por frame/canal y reconstruye el video YUV (np.ndarray 1D uint8).
+        Además, calcula el bitrate por frame usando los datos Huffman de cada canal.
         """
         from pipeline.stages.entropie.huffmann_codierung import huffman_decode_frame
         width_uv = width // 2
         height_uv = height // 2
         frame_size = width * height + 2 * (width_uv * height_uv)
         output = np.empty(num_frames * frame_size, dtype=np.uint8)
+        self.reset_bitrate()
 
         for frame_idx in range(num_frames):
             frame = frames[frame_idx]
             y_tuple, u_tuple, v_tuple = frame
             # y_tuple: (encoded_blocks, huff_table, pads, shape, mode_flags, min_vals, steps)
+            # Calcular bitrate por frame usando los encoded_blocks de cada canal
+            encoded_blocks_yuv = [y_tuple[0], u_tuple[0], v_tuple[0]]
+            self.calculate_and_set_bitrate_per_frame(encoded_blocks_yuv, width, height)
+
             y_blocks = huffman_decode_frame(y_tuple[0], y_tuple[1], y_tuple[2], y_tuple[3])
             u_blocks = huffman_decode_frame(u_tuple[0], u_tuple[1], u_tuple[2], u_tuple[3])
             v_blocks = huffman_decode_frame(v_tuple[0], v_tuple[1], v_tuple[2], v_tuple[3])
@@ -150,7 +189,7 @@ class CompressorFinal:
             output[start:start + width*height] = y_rec.flatten()
             output[start + width*height : start + width*height + width_uv*height_uv] = u_rec.flatten()
             output[start + width*height + width_uv*height_uv : start + frame_size] = v_rec.flatten()
-            print(f"decompressed frame {frame_idx + 1}/{num_frames}")
+            print(f"decompressed frame {frame_idx + 1}/{num_frames} | bitrate: {self.get_bitrate()[-1]:.4f} bits/pixel")
         return output
 @njit
 def compress_frame_test(
