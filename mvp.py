@@ -362,10 +362,8 @@ class Vid:
                 frame_quantized = [0] * width * height
                 frame_reconstructed = [0] * width * height
 
-                assert width % BLOCK_SIZE[0] == 0
-                assert height % BLOCK_SIZE[1] == 0
-                blocks_per_row = width // BLOCK_SIZE[0]
-                blocks_per_column = height // BLOCK_SIZE[1]
+                blocks_per_row = (width + BLOCK_SIZE[0] - 1) // BLOCK_SIZE[0]
+                blocks_per_column = (height + BLOCK_SIZE[1] - 1) // BLOCK_SIZE[1]
 
                 for block_y in range(blocks_per_column):
                     for block_x in range(blocks_per_row):
@@ -373,7 +371,10 @@ class Vid:
 
                         # decorrelation
                         # TODO: implement prediction
-                        c_transformed = discrete_cosine_transform_block(width, c[byte_offset:])
+                        c_block_width = min(BLOCK_SIZE[0], width - BLOCK_SIZE[0] * block_x)
+                        c_block_height = min(BLOCK_SIZE[1], height - BLOCK_SIZE[1] * block_y)
+
+                        c_transformed = discrete_cosine_transform_block(width, c[byte_offset:], c_block_width, c_block_height)
                         c_quantized = [round(x / quantization_interval) for x in c_transformed]
 
                         # reconstruct frame for prediction
@@ -407,7 +408,6 @@ class Vid:
                 bitlengths = huffman_coding_length_limited(symbol_counts, CODEWORD_MAX_BITS)
 
                 bitlengths_all = []
-                # TODO: symbols is sorted, so don't search
                 for i in range(quantization_levels):
                     bitlen = 0
                     if i in symbols:
@@ -479,11 +479,10 @@ def precompute_dct_cosine_values(N: int) -> list[float]:
 
 
 @njit
-def discrete_cosine_transform_block(stride: int, data: list[int]) -> list[float]:
+def discrete_cosine_transform_block(stride: int, data: list[int], data_width: int, data_height: int) -> list[float]:
     transformed = [0] * BLOCK_SIZE[0] * BLOCK_SIZE[1]
     block = [0] * BLOCK_SIZE[0] * BLOCK_SIZE[1]
 
-    # TODO: assumes width and height multiple of 8, fix that
     # transform horizontally
     N = BLOCK_SIZE[0]
     for y in range(BLOCK_SIZE[1]):
@@ -492,7 +491,9 @@ def discrete_cosine_transform_block(stride: int, data: list[int]) -> list[float]
 
             summed_xs = 0
             for x in range(BLOCK_SIZE[0]):
-                offset = (y * stride) + x
+                y_bounded = min(y, data_height - 1)
+                x_bounded = min(x, data_width - 1)
+                offset = (y_bounded * stride) + x_bounded
                 n = x
                 summed_xs += data[offset] * math.cos((2 * n + 1) * math.pi * k / (2 * N))
 
