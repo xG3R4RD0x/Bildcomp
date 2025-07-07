@@ -3,13 +3,8 @@ import unittest
 import os
 from PIL import Image
 
-from pipeline.compression.compressor_final import CompressorFinal, compress_block_prediction, compress_block_prediction_and_quant, compress_block_prediction_dct_and_quant, compress_block_transformation, compress_block_transformation_and_quant, compress_frame_test, decompress_block_prediction, decompress_block_prediction_and_quant, decompress_block_prediction_dct_and_quant, decompress_block_transformation, decompress_block_transformation_and_quant, decompress_frame_test
-from pipeline.compression.compressor_final import compress_frame
+from pipeline.compression.compressor_final import CompressorFinal, compress_block_prediction_dct_and_quant, compress_frame_test, decompress_block_prediction_dct_and_quant, decompress_frame_test
 from pipeline.stages.decorrelation.decorrelation_stage import separate_yuv_compression
-from pipeline.compression.compressor_final import compress_frame
-from pipeline.compression.compressor_final import compress_block
-from pipeline.compression.compressor_final import decompress_block
-from pipeline.compression.compressor_final import decompress_frame
 from pipeline.stages.bitwriter.bitwritter import BitWriter
 import numpy as np
 
@@ -295,280 +290,7 @@ class CompressorFinalTest(unittest.TestCase):
             self.assertGreater(psnr_y, 20, f"PSNR Y muy bajo en frame {i}")
             self.assertGreater(psnr_u, 20, f"PSNR U muy bajo en frame {i}")
             self.assertGreater(psnr_v, 20, f"PSNR V muy bajo en frame {i}")
-        
-        
-    def test_compress_decompress_transformation_block_on_first_frame(self):
-        """
-        Test compress_block and decompress_block transformation on a manually extracted block from the Y channel of the first frame
-        """
-
-        # Lee el archivo completo como array 1D
-        input_data = np.fromfile(self.video_path, dtype=np.uint8)
-        frame_size = self.width * self.height * 3 // 2
-        first_frame = input_data[:frame_size]
-        # Separa los canales YUV
-        yuv_dict = separate_yuv_compression(first_frame, self.width, self.height)
-        y_channel = yuv_dict[0]
-        block_size = 8
-        cosines = precompute_cosines(block_size)
-        # Padding manual para el canal Y
-        padded_h = ((self.height + block_size - 1) // block_size) * block_size
-        padded_w = ((self.width + block_size - 1) // block_size) * block_size
-        padded_y = np.zeros((padded_h, padded_w), dtype=np.uint8)
-        padded_y[:self.height, :self.width] = y_channel
-        # Extrae el primer bloque (0,0)
-        by, bx = 0, 0
-        y_start = by * block_size
-        x_start = bx * block_size
-        block = padded_y[y_start:y_start+block_size, x_start:x_start+block_size]
-        # Llama compress_block
-        transformed_block = compress_block_transformation(
-            block,
-            i_start=0,
-            j_start=0,
-            block_size=block_size,
-            levels=128,
-            cosines=cosines
-        )
-        # Verifica formas y tipos
-        self.assertEqual(transformed_block.shape, (block_size, block_size))
-       
-        # El bloque cuantizado no debe ser todo ceros
-        self.assertTrue(np.any(transformed_block))
-
-        # Ahora descomprime el bloque y verifica que la forma y valores sean razonables
-        decompressed_block = decompress_block_transformation(
-            transformed_block,
-            cosines,
-            block_size
-        )
-        self.assertEqual(decompressed_block.shape, (block_size, block_size))
-        # El bloque descomprimido debe ser similar al original (no necesariamente igual por pérdidas)
-        # Pero al menos debe ser un array numérico válido
-        self.assertTrue(np.issubdtype(decompressed_block.dtype, np.floating))
-
-        # Calcular diferencia absoluta media y máxima entre original y reconstruido
-        abs_diff = np.abs(block.astype(np.float32) - decompressed_block)
-        mean_diff = np.mean(abs_diff)
-        max_diff = np.max(abs_diff)
-        print(f"Mean abs diff: {mean_diff:.2f}, Max abs diff: {max_diff:.2f}")
-        # El error medio debe ser razonable para compresión con pérdidas (ajustar umbral si necesario)
-        self.assertLess(mean_diff, 30)
-
-        # Calcular PSNR entre bloque original y reconstruido
-        mse = np.mean((block.astype(np.float32) - decompressed_block) ** 2)
-        if mse == 0:
-            psnr = float('inf')
-        else:
-            PIXEL_MAX = 255.0
-            psnr = 10 * np.log10((PIXEL_MAX ** 2) / mse)
-        print(f"PSNR: {psnr:.2f} dB")
-        # El PSNR debe ser razonable para compresión con pérdidas (ajustar umbral si necesario)
-        self.assertGreater(psnr, 20)
-    def test_compress_decompress_prediction_block_on_first_frame(self):
-        """
-        Test compress_block and decompress_block transformation on a manually extracted block from the Y channel of the first frame
-        """
-
-        # Lee el archivo completo como array 1D
-        input_data = np.fromfile(self.video_path, dtype=np.uint8)
-        frame_size = self.width * self.height * 3 // 2
-        first_frame = input_data[:frame_size]
-        # Separa los canales YUV
-        yuv_dict = separate_yuv_compression(first_frame, self.width, self.height)
-        y_channel = yuv_dict[0]
-        block_size = 8
-        cosines = precompute_cosines(block_size)
-        # Padding manual para el canal Y
-        padded_h = ((self.height + block_size - 1) // block_size) * block_size
-        padded_w = ((self.width + block_size - 1) // block_size) * block_size
-        padded_y = np.zeros((padded_h, padded_w), dtype=np.uint8)
-        padded_y[:self.height, :self.width] = y_channel
-        # Extrae el primer bloque (0,0)
-        by, bx = 0, 0
-        y_start = by * block_size
-        x_start = bx * block_size
-        block = padded_y[y_start:y_start+block_size, x_start:x_start+block_size]
-        # Llama compress_block
-        residual_block, mode_flag = compress_block_prediction(
-        block,
-        i_start=0,
-        j_start=0,
-        block_size=block_size,
-        levels=128,
-        cosines=cosines
-    )
-        # Verifica formas y tipos
-        self.assertEqual(residual_block.shape, (block_size, block_size))
-        self.assertIsInstance(mode_flag, (int, np.integer))
-        # El residual no debe ser todo ceros
-        self.assertTrue(np.any(residual_block))
-
-        # Ahora descomprime el bloque y verifica que la forma y valores sean razonables
-        decompressed_block = decompress_block_prediction(
-            residual_block, mode_flag, block_size
-        )
-        self.assertEqual(decompressed_block.shape, (block_size, block_size))
-        # El bloque descomprimido debe ser similar al original (no necesariamente igual por pérdidas)
-        # Pero al menos debe ser un array numérico válido
-        self.assertTrue(np.issubdtype(decompressed_block.dtype, np.integer))
-
-        # Calcular diferencia absoluta media y máxima entre original y reconstruido
-        abs_diff = np.abs(block.astype(np.float32) - decompressed_block)
-        mean_diff = np.mean(abs_diff)
-        max_diff = np.max(abs_diff)
-        print(f"Mean abs diff: {mean_diff:.2f}, Max abs diff: {max_diff:.2f}")
-        # El error medio debe ser razonable para compresión con pérdidas (ajustar umbral si necesario)
-        self.assertLess(mean_diff, 30)
-
-        # Calcular PSNR entre bloque original y reconstruido
-        mse = np.mean((block.astype(np.float32) - decompressed_block) ** 2)
-        if mse == 0:
-            psnr = float('inf')
-        else:
-            PIXEL_MAX = 255.0
-            psnr = 10 * np.log10((PIXEL_MAX ** 2) / mse)
-        print(f"PSNR: {psnr:.2f} dB")
-        # El PSNR debe ser razonable para compresión con pérdidas (ajustar umbral si necesario)
-        self.assertGreater(psnr, 20)
-        
-    def test_compress_decompress_transformation_and_quant_block_on_first_frame(self):
-        """
-        Test compress_block and decompress_block transformation on a manually extracted block from the Y channel of the first frame
-        """
-
-        # Lee el archivo completo como array 1D
-        input_data = np.fromfile(self.video_path, dtype=np.uint8)
-        frame_size = self.width * self.height * 3 // 2
-        first_frame = input_data[:frame_size]
-        # Separa los canales YUV
-        yuv_dict = separate_yuv_compression(first_frame, self.width, self.height)
-        y_channel = yuv_dict[0]
-        block_size = 8
-        cosines = precompute_cosines(block_size)
-        # Padding manual para el canal Y
-        padded_h = ((self.height + block_size - 1) // block_size) * block_size
-        padded_w = ((self.width + block_size - 1) // block_size) * block_size
-        padded_y = np.zeros((padded_h, padded_w), dtype=np.uint8)
-        padded_y[:self.height, :self.width] = y_channel
-        # Extrae el primer bloque (0,0)
-        by, bx = 0, 0
-        y_start = by * block_size
-        x_start = bx * block_size
-        block = padded_y[y_start:y_start+block_size, x_start:x_start+block_size]
-        # Llama compress_block
-        transformed_block, min_val, step = compress_block_transformation_and_quant(
-            block,
-            i_start=0,
-            j_start=0,
-            block_size=block_size,
-            levels=128,
-            cosines=cosines
-        )
-        # Verifica formas y tipos
-        self.assertEqual(transformed_block.shape, (block_size, block_size))
-       
-        # El bloque cuantizado no debe ser todo ceros
-        self.assertTrue(np.any(transformed_block))
-
-        # Ahora descomprime el bloque y verifica que la forma y valores sean razonables
-        decompressed_block = decompress_block_transformation_and_quant(
-            transformed_block,
-            min_val,
-            step,
-            cosines,
-            block_size
-        )
-        self.assertEqual(decompressed_block.shape, (block_size, block_size))
-        # El bloque descomprimido debe ser similar al original (no necesariamente igual por pérdidas)
-        # Pero al menos debe ser un array numérico válido
-        self.assertTrue(np.issubdtype(decompressed_block.dtype, np.floating))
-
-        # Calcular diferencia absoluta media y máxima entre original y reconstruido
-        abs_diff = np.abs(block.astype(np.float32) - decompressed_block)
-        mean_diff = np.mean(abs_diff)
-        max_diff = np.max(abs_diff)
-        print(f"Mean abs diff: {mean_diff:.2f}, Max abs diff: {max_diff:.2f}")
-        # El error medio debe ser razonable para compresión con pérdidas (ajustar umbral si necesario)
-        self.assertLess(mean_diff, 30)
-
-        # Calcular PSNR entre bloque original y reconstruido
-        mse = np.mean((block.astype(np.float32) - decompressed_block) ** 2)
-        if mse == 0:
-            psnr = float('inf')
-        else:
-            PIXEL_MAX = 255.0
-            psnr = 10 * np.log10((PIXEL_MAX ** 2) / mse)
-        print(f"PSNR: {psnr:.2f} dB")
-        # El PSNR debe ser razonable para compresión con pérdidas (ajustar umbral si necesario)
-        self.assertGreater(psnr, 20)
-    def test_compress_decompress_prediction_and_quant_block_on_first_frame(self):
-        """
-        Test compress_block and decompress_block transformation on a manually extracted block from the Y channel of the first frame
-        """
-
-        # Lee el archivo completo como array 1D
-        input_data = np.fromfile(self.video_path, dtype=np.uint8)
-        frame_size = self.width * self.height * 3 // 2
-        first_frame = input_data[:frame_size]
-        # Separa los canales YUV
-        yuv_dict = separate_yuv_compression(first_frame, self.width, self.height)
-        y_channel = yuv_dict[0]
-        block_size = 8
-        cosines = precompute_cosines(block_size)
-        # Padding manual para el canal Y
-        padded_h = ((self.height + block_size - 1) // block_size) * block_size
-        padded_w = ((self.width + block_size - 1) // block_size) * block_size
-        padded_y = np.zeros((padded_h, padded_w), dtype=np.uint8)
-        padded_y[:self.height, :self.width] = y_channel
-        # Extrae el primer bloque (0,0)
-        by, bx = 0, 0
-        y_start = by * block_size
-        x_start = bx * block_size
-        block = padded_y[y_start:y_start+block_size, x_start:x_start+block_size]
-        # Llama compress_block
-        residual_block, mode_flag, min_val, step = compress_block_prediction_and_quant(
-        block,
-        i_start=0,
-        j_start=0,
-        block_size=block_size,
-        levels=128,
-        cosines=cosines
-    )
-        # Verifica formas y tipos
-        self.assertEqual(residual_block.shape, (block_size, block_size))
-        self.assertIsInstance(mode_flag, (int, np.integer))
-        # El residual no debe ser todo ceros
-        self.assertTrue(np.any(residual_block))
-
-        # Ahora descomprime el bloque y verifica que la forma y valores sean razonables
-        decompressed_block = decompress_block_prediction_and_quant(
-            residual_block, mode_flag, min_val, step, block_size
-        )
-        self.assertEqual(decompressed_block.shape, (block_size, block_size))
-        # El bloque descomprimido debe ser similar al original (no necesariamente igual por pérdidas)
-        # Pero al menos debe ser un array numérico válido
-        self.assertTrue(np.issubdtype(decompressed_block.dtype, np.float32))
-
-        # Calcular diferencia absoluta media y máxima entre original y reconstruido
-        abs_diff = np.abs(block.astype(np.float32) - decompressed_block)
-        mean_diff = np.mean(abs_diff)
-        max_diff = np.max(abs_diff)
-        print(f"Mean abs diff: {mean_diff:.2f}, Max abs diff: {max_diff:.2f}")
-        # El error medio debe ser razonable para compresión con pérdidas (ajustar umbral si necesario)
-        self.assertLess(mean_diff, 30)
-
-        # Calcular PSNR entre bloque original y reconstruido
-        mse = np.mean((block.astype(np.float32) - decompressed_block) ** 2)
-        if mse == 0:
-            psnr = float('inf')
-        else:
-            PIXEL_MAX = 255.0
-            psnr = 10 * np.log10((PIXEL_MAX ** 2) / mse)
-        print(f"PSNR: {psnr:.2f} dB")
-        # El PSNR debe ser razonable para compresión con pérdidas (ajustar umbral si necesario)
-        self.assertGreater(psnr, 20)
-        
+            
     def test_compress_decompress_block_full_on_first_frame(self):
         """
         Test compress_block_prediction_dct_and_quant y decompress_block_prediction_dct_and_quant
@@ -662,7 +384,7 @@ class CompressorFinalTest(unittest.TestCase):
         padded_h = ((self.height + block_size - 1) // block_size) * block_size
         padded_w = ((self.width + block_size - 1) // block_size) * block_size
         # Comprime el canal Y
-        compressed_y = compress_frame(
+        compressed_y = compress_frame_test(
             frame_data=y_channel.tobytes(),
             width=self.width,
             height=self.height,
@@ -673,12 +395,13 @@ class CompressorFinalTest(unittest.TestCase):
             cosines=cosines
         )
         # Descomprime el canal Y
-        decompressed_yuv = decompress_frame(
+        decompressed_yuv = decompress_frame_test(
             compressed_y,
             self.width,
             self.height,
-            block_size,
-            128
+            block_size=block_size,
+            levels=128,
+            cosines=cosines
         )
         # Verifica que la salida tenga la forma esperada
      

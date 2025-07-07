@@ -7,7 +7,7 @@ class BitWriter:
 
     def write_header(self, width, height, num_frames, block_size, levels):
         """
-        Escribe el header del archivo comprimido.
+        Writes the header of the compressed file.
         Header: [width (H)][height (H)][num_frames (H)][block_size (B)][levels (B)]
         """
         with open(self.file_path, 'wb') as f:
@@ -15,7 +15,7 @@ class BitWriter:
                     
     def write_compressed_video(self, video_data, width, height, num_frames, block_size, levels):
         """
-        Escribe los frames procesados (arrays y metadatos) en el archivo.
+        Writes the processed frames (arrays and metadata) to the file.
         """
         data_bytes = self.serialize_compressed_video(
             video_data, width, height, num_frames, block_size, levels
@@ -25,16 +25,16 @@ class BitWriter:
 
     def write_reconstructed_video(self, video_bytes, mode='wb'):
         """
-        Escribe los bytes del video reconstruido (YUV plano) en el archivo.
-        Por defecto sobrescribe el archivo (modo 'wb'). Si se desea agregar, usar mode='ab'.
+        Writes the bytes of the reconstructed video (raw YUV) to the file.
+        By default, it overwrites the file (mode 'wb'). If you want to append, use mode='ab'.
         """
         with open(self.file_path, mode) as f:
             f.write(video_bytes)
 
     def read_header(self, header_size:int = 8):
         """
-        Lee el header del archivo comprimido.
-        Devuelve: (width, height, num_frames, block_size, levels)
+        Reads the header of the compressed file.
+        Returns: (width, height, num_frames, block_size, levels)
         """
         with open(self.file_path, 'rb') as f:
             header = f.read(header_size)
@@ -43,7 +43,7 @@ class BitWriter:
 
     def read_compressed_video(self):
         """
-        Lee el archivo comprimido y devuelve la estructura deserializada.
+        Reads the compressed file and returns the deserialized structure.
         """
         with open(self.file_path, "rb") as f:
             data = f.read()
@@ -51,39 +51,39 @@ class BitWriter:
     
     def read_original_video(self):
         """
-        Lee el resto del archivo (después del header).
-        Devuelve los bytes de video original.
+        Reads the rest of the file (after the header).
+        Returns the bytes of the original video.
         """
         return np.fromfile(self.file_path, dtype=np.uint8)
     
     def serialize_compressed_video(self,compressed_frames, width, height, num_frames, block_size, levels):
         """
-        Serializa la estructura de salida de process_video_compression a un objeto bytes,
-        usando el mismo formato que BitWriter.write_compressed_video.
+        Serializes the output structure of process_video_compression to a bytes object,
+        using the same format as BitWriter.write_compressed_video.
         """
         byte_chunks = []
-        # Header: width, height, num_frames, block_size, levels (todos <HHHBB>)
+        # Header: width, height, num_frames, block_size, levels (all <HHHBB>)
         byte_chunks.append(struct.pack('<HHHBB', width, height, num_frames, block_size, levels))
         for frame in compressed_frames:
             for channel_tuple in frame:  # [y_out, u_out, v_out]
                 processed_blocks, mode_flags, min_vals, steps = channel_tuple
                 n_blocks_y, n_blocks_x = mode_flags.shape
-                # Guarda shape (2 int32)
+                # Save shape (2 int32)
                 byte_chunks.append(struct.pack("ii", n_blocks_y, n_blocks_x))
-                # Guarda min_vals y steps (float32 por bloque)
+                # Save min_vals and steps (float32 per block)
                 byte_chunks.append(min_vals.astype(np.float32).tobytes())
                 byte_chunks.append(steps.astype(np.float32).tobytes())
-                # Guarda todos los bloques (uint8)
+                # Save all blocks (uint8)
                 byte_chunks.append(processed_blocks.astype(np.uint8).tobytes())
-                # Guarda todos los mode_flags (uint8)
+                # Save all mode_flags (uint8)
                 byte_chunks.append(mode_flags.astype(np.uint8).tobytes())
         return b"".join(byte_chunks)
 
     def deserialize_compressed_video(self, data: bytes):
         """
-        Deserializa un archivo binario comprimido y reconstruye la estructura:
+        Deserializes a compressed binary file and reconstructs the structure:
         [ [ (processed_blocks, mode_flags, min_vals, steps), ... ], ... ]
-        Devuelve: (frames, width, height, num_frames, block_size, levels)
+        Returns: (frames, width, height, num_frames, block_size, levels)
         """
         offset = 0
         width, height, num_frames, block_size, levels = struct.unpack_from('<HHHBB', data, offset)
