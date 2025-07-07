@@ -694,7 +694,7 @@ def print_usage_and_exit():
 
 def compress_and_save_to_file(input_file_yuv: str, output_file_vid: str, quantization_interval: int | None = None):
     content = None
-    with open(input_file, 'rb') as f:
+    with open(input_file_yuv, 'rb') as f:
         content = f.read()
 
     metadata = parse_raw_metadata_from_filename(input_file_yuv)
