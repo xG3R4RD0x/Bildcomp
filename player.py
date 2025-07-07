@@ -1,5 +1,6 @@
 import numpy as np
 import os
+import glob
 import sys
 import mvp
 import time
@@ -12,6 +13,11 @@ from pipeline.compression.compressor_final import CompressorFinal
 
 FPS = 24
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
+TEMP_YUV_STORAGE = "temp_yuv_storage/"
+if os.path.exists(TEMP_YUV_STORAGE):
+    files = glob.glob(TEMP_YUV_STORAGE + "/*")
+    for f in files:
+        os.remove(f)
 
 class Video:
     def __init__(self, id, path):
@@ -72,21 +78,38 @@ class Video:
             t_end = time.time()
             print(f"Decoding time: {t_end - t_start:.8f} seconds")
         elif self.path.endswith(".finalcomp"):
-            ''' Handling for Predcition algorithmus '''
-            dims = self.path.split(".", 1)[0].split("_")[-1].split("x")
-            self.width, self.height = int(dims[0]), int(dims[1])
-
+            '''
+            Handling for Predcition algorithmus 
+            The decompressing stage is hard coded to output a yuv file. We temporary save the file and load it into the player
+            '''
             t_start = time.time()
-            frame_size = self.width * self.height * 3 // 2  # YUV420p
-            frames, bits_per_frame = mvp.load_vid_file_in_player(self.path)
-            self.bitrate_per_frame = bits_per_frame
 
-            for frame in frames:
-                yuv_bytestring = frame.y + frame.u + frame.v
-                components = ds.separate_yuv(yuv_bytestring, self.width, self.height)
-                rgb = components["rgb"]
-                img = Image.fromarray(rgb, "RGB")
-                self.frames.append(img)
+            if not os.path.exists(TEMP_YUV_STORAGE):
+                os.makedirs(TEMP_YUV_STORAGE)
+            cf = CompressorFinal()
+            cf.decompress_video(self.path, TEMP_YUV_STORAGE)
+
+            filename = os.path.basename(self.path).removesuffix('.finalcomp')
+            path_decompressed_yuv = TEMP_YUV_STORAGE + filename + ".yuv"
+            dims = path_decompressed_yuv.split(".", 1)[0].split("_")[-1].split("x")
+            self.width, self.height = int(dims[0]), int(dims[1])
+            frame_size = self.width * self.height * 3 // 2  # YUV420p
+
+            bits_per_pixel = cf.get_bitrate()
+            for i in bits_per_pixel:
+                i = i * self.height * self.width
+                self.bitrate_per_frame.append(i)
+
+            with open(path_decompressed_yuv, "rb") as f:
+                while True:
+                    data = f.read(frame_size)
+                    if len(data) < frame_size:
+                        break
+                    components = ds.separate_yuv(data, self.width, self.height)
+                    #self.calculate_bitrate()
+                    rgb = components["rgb"]
+                    img = Image.fromarray(rgb, "RGB")
+                    self.frames.append(img)
             t_end = time.time()
             print(f"Decoding time: {t_end - t_start:.8f} seconds")
 
