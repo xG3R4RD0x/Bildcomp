@@ -412,7 +412,8 @@ class Player:
                     if output_filepath:
                         t_start = time.time()
                         print("Compressing...")
-                        mvp.compress_and_save_to_file(video_to_save.path, output_filepath, self.quantization_level)
+                        video_to_save_metadata = mvp.RawYUVMetadata(video_to_save.width, video_to_save.height, 25)
+                        mvp.compress_and_save_to_file(video_to_save.path, video_to_save_metadata, output_filepath, self.quantization_level)
                         t_end = time.time()
                         print(f"Encoding time: {t_end - t_start:.8f} seconds")
             elif comp_dialog.result == list_of_comps[1]: # prediction

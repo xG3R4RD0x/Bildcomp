@@ -692,16 +692,14 @@ def print_usage_and_exit():
     --help                                Show this help and quit.
 """)
 
-def compress_and_save_to_file(input_file_yuv: str, output_file_vid: str, quantization_interval: int | None = None):
+def compress_and_save_to_file(input_file_yuv: str, input_metadata: RawYUVMetadata, output_file_vid: str, quantization_interval: int | None = None):
     content = None
     with open(input_file_yuv, 'rb') as f:
         content = f.read()
 
-    metadata = parse_raw_metadata_from_filename(input_file_yuv)
-
-    ys_size = metadata.width * metadata.height * 1
-    us_size = metadata.width * metadata.height // 4
-    vs_size = metadata.width * metadata.height // 4
+    ys_size = input_metadata.width * input_metadata.height * 1
+    us_size = input_metadata.width * input_metadata.height // 4
+    vs_size = input_metadata.width * input_metadata.height // 4
 
     frame_size = ys_size + us_size + vs_size
 
@@ -714,12 +712,12 @@ def compress_and_save_to_file(input_file_yuv: str, output_file_vid: str, quantiz
         vs = content[offset+ys_size+us_size:offset+ys_size+us_size+vs_size]
         offset += frame_size
 
-        frame = YUVImage(metadata.width, metadata.height, ys, us, vs)
+        frame = YUVImage(input_metadata.width, input_metadata.height, ys, us, vs)
         frames.append(frame)
 
     print("")
 
-    vid = Vid(metadata.fps, metadata.width, metadata.height, frames)
+    vid = Vid(input_metadata.fps, input_metadata.width, input_metadata.height, frames)
     if quantization_interval is not None:
         vid.quantization_y_interval = quantization_interval
         vid.quantization_u_interval = quantization_interval
@@ -773,7 +771,8 @@ if __name__ == '__main__':
 
     # execute the program with the given subcommand and options
     if subcommand == "compress":
-        compress_and_save_to_file(input_file, output_file, quantization_interval)
+        metadata = parse_raw_metadata_from_filename(input_file)
+        compress_and_save_to_file(input_file, metadata, output_file, quantization_interval)
     elif subcommand == "decompress":
         vid: Vid = Vid.read_from_file(input_file)
         with open(output_file, 'wb') as f:
