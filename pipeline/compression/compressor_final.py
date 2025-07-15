@@ -23,20 +23,21 @@ class CompressorFinal:
     def set_bitrate(self, value):
         self._bitrate = value
 
-    def calculate_and_set_bitrate_per_frame(self, encoded_blocks_yuv, width, height):
+    def calculate_and_set_bitrate_per_frame(self, encoded_blocks_yuv, pads_yuv, width, height):
         """
-        Calculates the bitrate (bits per pixel) for a single frame given the encoded blocks for Y, U, V.
+        Calculates the bitrate (bits per pixel) for a single frame given the encoded blocks and pads for Y, U, V.
         Updates the internal _bitrate list (one value per frame).
         """
         if not hasattr(self, '_bitrate') or self._bitrate is None:
             self._bitrate = []
-        # encoded_blocks_yuv: list/tuple of (encoded_blocks_y, encoded_blocks_u, encoded_blocks_v)
-        total_bits = sum(len(b) * 8 for b in encoded_blocks_yuv)
+        # encoded_blocks_yuv: list of lists of bytes [Y_blocks, U_blocks, V_blocks]
+        # pads_yuv: list of lists of int [Y_pads, U_pads, V_pads]
+        total_bits = 0
+        for blocks, pads in zip(encoded_blocks_yuv, pads_yuv):
+            for b, pad in zip(blocks, pads):
+                total_bits += len(b) * 8 - pad
         total_pixels = int(width * height * 1.5)  # YUV420
-        if total_pixels > 0:
-            bitrate = total_bits / total_pixels
-        else:
-            bitrate = 0
+        bitrate = total_bits / total_pixels if total_pixels > 0 else 0
         self._bitrate.append(bitrate)
         return bitrate
 
@@ -102,7 +103,6 @@ class CompressorFinal:
         Receives a raw YUV420 video (np.ndarray 1D uint8), splits it into frames, separa canales, aplica compress_frame_test y luego Huffman por frame/canal.
         Devuelve una lista de resultados comprimidos por frame y canal: [[(encoded_blocks, huff_table, pads, shape, mode_flags, min_vals, steps), ...], ...]
         """
-        from pipeline.stages.entropie.huffmann_codierung import huffman_encode_frame
         frame_size = width * height * 3 // 2
         num_frames = video_data.size // frame_size
         width_uv = width // 2
@@ -131,6 +131,7 @@ class CompressorFinal:
             # y_out, u_out, v_out: (processed_blocks, mode_flags, min_vals, steps)
             frame_result = []
             encoded_blocks_yuv = []
+            pads_yuv = []
             for out in [y_out, u_out, v_out]:
                 processed_blocks, mode_flags, min_vals, steps = out
                 # Codifica solo los processed_blocks con Huffman por frame/canal
@@ -138,8 +139,9 @@ class CompressorFinal:
                 encoded_blocks, huff_table, pads, shape = huffman_encode_frame(blocks_array)
                 frame_result.append((encoded_blocks, huff_table, pads, shape, mode_flags, min_vals, steps))
                 encoded_blocks_yuv.append(encoded_blocks)
+                pads_yuv.append(pads)
             # Calcular y guardar el bitrate de este frame
-            self.calculate_and_set_bitrate_per_frame(encoded_blocks_yuv, width, height)
+            self.calculate_and_set_bitrate_per_frame(encoded_blocks_yuv, pads_yuv, width, height)
             results.append(frame_result)
             print(f"compressed frame {frame_idx + 1}/{num_frames} | bitrate: {self.get_bitrate()[-1]:.4f} bits/pixel")
         return results
@@ -150,7 +152,6 @@ class CompressorFinal:
         decodifica Huffman por frame/canal y reconstruye el video YUV (np.ndarray 1D uint8).
         Además, calcula el bitrate por frame usando los datos Huffman de cada canal.
         """
-        from pipeline.stages.entropie.huffmann_codierung import huffman_decode_frame
         width_uv = width // 2
         height_uv = height // 2
         frame_size = width * height + 2 * (width_uv * height_uv)
@@ -161,9 +162,10 @@ class CompressorFinal:
             frame = frames[frame_idx]
             y_tuple, u_tuple, v_tuple = frame
             # y_tuple: (encoded_blocks, huff_table, pads, shape, mode_flags, min_vals, steps)
-            # Calcular bitrate por frame usando los encoded_blocks de cada canal
+            # Extrae pads de cada canal
             encoded_blocks_yuv = [y_tuple[0], u_tuple[0], v_tuple[0]]
-            self.calculate_and_set_bitrate_per_frame(encoded_blocks_yuv, width, height)
+            pads_yuv = [y_tuple[2], u_tuple[2], v_tuple[2]]
+            self.calculate_and_set_bitrate_per_frame(encoded_blocks_yuv, pads_yuv, width, height)
 
             y_blocks = huffman_decode_frame(y_tuple[0], y_tuple[1], y_tuple[2], y_tuple[3])
             u_blocks = huffman_decode_frame(u_tuple[0], u_tuple[1], u_tuple[2], u_tuple[3])
