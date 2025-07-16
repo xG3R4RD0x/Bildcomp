@@ -24,7 +24,7 @@
 #         self.assertEqual(data, decoded)
 
 #     def test_repeated_bytes(self):
-#         # Datos con repeticiones
+#         # Data with repetitions
 #         data = b'A' * 1000 + b'B' * 500 + b'C' * 100
 #         encoded = self.huffman.process(data)
 #         decoded = self.huffman.process(encoded, decode=True)
@@ -45,7 +45,7 @@
 
 #     def test_huffman_frame(self):
 #         """
-#         Codifica y decodifica el primer frame del video usando DCT, cuantización y Huffman.
+#         Encodes and decodes the first frame of the video using DCT, quantization, and Huffman.
 #         """
 #         y_size = self.input_width * self.input_height
 #         y = self.first_frame[:y_size].astype(np.float64).reshape((self.input_height, self.input_width))

@@ -7,7 +7,9 @@ class PredictionStrategy:
     def __init__(self):
         self.mode_flags = {"vertical": 0b00, "horizontal": 0b01, "average": 0b10}
 
-    def process(self, data: Dict[str, Any], block_size: int = 8, borders: bool = False) -> Dict[str, Any]:
+    def process(
+        self, data: Dict[str, Any], block_size: int = 8, borders: bool = False
+    ) -> Dict[str, Any]:
         results = {}
         for component in ["y", "u", "v"]:
             component_data = np.copy(data[component])
@@ -18,16 +20,14 @@ class PredictionStrategy:
             residuals = np.zeros((height, width), dtype=np.uint8)
             mode_flags_map = np.zeros((blocks_h, blocks_w), dtype=np.uint8)
 
-#aqui hago el proceso para todo el frame
-#empiezo por columnas
             for bi in range(blocks_h):
-                #luego por filas
+
                 for bj in range(blocks_w):
                     i_start = bi * block_size
                     j_start = bj * block_size
                     i_end = min(i_start + block_size, height)
                     j_end = min(j_start + block_size, width)
-                
+
                     best_mode, block_residuals = find_best_mode_and_residuals_uint8(
                         component_data, i_start, j_start, i_end, j_end, borders
                     )
@@ -39,18 +39,19 @@ class PredictionStrategy:
             results[f"{component}_mode_flags"] = mode_flags_map
 
         return results
+
+
 @njit(inline="always")
 def _to_mode_flag(mode: str) -> int:
-        """
-        it changes the string name to the mode flag binary value
-        """
-        if mode == "vertical":
-            return 0b00
-        elif mode == "horizontal":
-            return 0b01
-        elif mode == "average":
-            return 0b10
-
+    """
+    it changes the string name to the mode flag binary value
+    """
+    if mode == "vertical":
+        return 0b00
+    elif mode == "horizontal":
+        return 0b01
+    elif mode == "average":
+        return 0b10
 
 
 @njit(inline="always")
@@ -102,7 +103,9 @@ def predict_average(data, i, j, borders=False, start_i=0, start_j=0):
 
 
 @njit
-def apply_prediction_block_uint8(data, i_start, j_start, i_end, j_end, mode, borders=False):
+def apply_prediction_block_uint8(
+    data, i_start, j_start, i_end, j_end, mode, borders=False
+):
     h = i_end - i_start
     w = j_end - j_start
     residuals = np.zeros((h, w), dtype=np.uint8)
@@ -113,11 +116,17 @@ def apply_prediction_block_uint8(data, i_start, j_start, i_end, j_end, mode, bor
             j = j_start + j_off
 
             if mode == 0:
-                pred = predict_vertical(data, i, j, borders=borders, start_i=i_start, start_j=j_start)
+                pred = predict_vertical(
+                    data, i, j, borders=borders, start_i=i_start, start_j=j_start
+                )
             elif mode == 1:
-                pred = predict_horizontal(data, i, j, borders=borders, start_i=i_start, start_j=j_start)
+                pred = predict_horizontal(
+                    data, i, j, borders=borders, start_i=i_start, start_j=j_start
+                )
             else:
-                pred = predict_average(data, i, j, borders=borders, start_i=i_start, start_j=j_start)
+                pred = predict_average(
+                    data, i, j, borders=borders, start_i=i_start, start_j=j_start
+                )
 
             actual = data[i, j]
             # Residual en rango [0, 255] como en Octave:
@@ -132,8 +141,11 @@ def apply_prediction_block_uint8(data, i_start, j_start, i_end, j_end, mode, bor
 
     return residuals
 
+
 @njit
-def apply_prediction_block_float(data, i_start, j_start, i_end, j_end, mode, borders=False):
+def apply_prediction_block_float(
+    data, i_start, j_start, i_end, j_end, mode, borders=False
+):
     h = i_end - i_start
     w = j_end - j_start
     residuals = np.zeros((h, w), dtype=np.float32)
@@ -144,11 +156,17 @@ def apply_prediction_block_float(data, i_start, j_start, i_end, j_end, mode, bor
             j = j_start + j_off
 
             if mode == 0:
-                pred = predict_vertical(data, i, j, borders=borders, start_i=i_start, start_j=j_start)
+                pred = predict_vertical(
+                    data, i, j, borders=borders, start_i=i_start, start_j=j_start
+                )
             elif mode == 1:
-                pred = predict_horizontal(data, i, j, borders=borders, start_i=i_start, start_j=j_start)
+                pred = predict_horizontal(
+                    data, i, j, borders=borders, start_i=i_start, start_j=j_start
+                )
             else:
-                pred = predict_average(data, i, j, borders=borders, start_i=i_start, start_j=j_start)
+                pred = predict_average(
+                    data, i, j, borders=borders, start_i=i_start, start_j=j_start
+                )
 
             actual = data[i, j]
             # Residual centrado en 0 (puede ser negativo)
@@ -157,12 +175,20 @@ def apply_prediction_block_float(data, i_start, j_start, i_end, j_end, mode, bor
 
     return residuals
 
-#esta funcion hace todo por bloque
+
 @njit
-def find_best_mode_and_residuals_uint8(data, i_start, j_start, i_end, j_end, borders=False):
-    res_v = apply_prediction_block_uint8(data, i_start, j_start, i_end, j_end, 0, borders)
-    res_h = apply_prediction_block_uint8(data, i_start, j_start, i_end, j_end, 1, borders)
-    res_a = apply_prediction_block_uint8(data, i_start, j_start, i_end, j_end, 2, borders)
+def find_best_mode_and_residuals_uint8(
+    data, i_start, j_start, i_end, j_end, borders=False
+):
+    res_v = apply_prediction_block_uint8(
+        data, i_start, j_start, i_end, j_end, 0, borders
+    )
+    res_h = apply_prediction_block_uint8(
+        data, i_start, j_start, i_end, j_end, 1, borders
+    )
+    res_a = apply_prediction_block_uint8(
+        data, i_start, j_start, i_end, j_end, 2, borders
+    )
 
     err_v = np.sum(np.abs(res_v - 128))
     err_h = np.sum(np.abs(res_h - 128))
@@ -173,12 +199,21 @@ def find_best_mode_and_residuals_uint8(data, i_start, j_start, i_end, j_end, bor
         return "horizontal", res_h
     else:
         return "average", res_a
-    
+
+
 @njit
-def find_best_mode_and_residuals_float(data, i_start, j_start, i_end, j_end, borders=False):
-    res_v = apply_prediction_block_float(data, i_start, j_start, i_end, j_end, 0, borders)
-    res_h = apply_prediction_block_float(data, i_start, j_start, i_end, j_end, 1, borders)
-    res_a = apply_prediction_block_float(data, i_start, j_start, i_end, j_end, 2, borders)
+def find_best_mode_and_residuals_float(
+    data, i_start, j_start, i_end, j_end, borders=False
+):
+    res_v = apply_prediction_block_float(
+        data, i_start, j_start, i_end, j_end, 0, borders
+    )
+    res_h = apply_prediction_block_float(
+        data, i_start, j_start, i_end, j_end, 1, borders
+    )
+    res_a = apply_prediction_block_float(
+        data, i_start, j_start, i_end, j_end, 2, borders
+    )
 
     err_v = np.sum(np.abs(res_v))
     err_h = np.sum(np.abs(res_h))

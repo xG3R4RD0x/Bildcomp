@@ -84,18 +84,19 @@ class BlockDCT:
             self.cosines,
             inverse=True,
         )
-        # tengo un margen de error en la transformación inversa
-        # todos los pixeles tiene un valor -1 de lo que deberían ser
-        # esto es porque la DCT no es exacta, y la IDCT tampoco
-        # por lo tanto, redondeo el resultado para que sea un entero
-        # y lo devuelvo como uint8
+        # I have a margin of error in the inverse transformation
+        # all pixels have a value -1 from what they should be
+        # this is because the DCT is not exact, and neither is the IDCT
+        # therefore, I round the result so that it is an integer
+        # and return it as uint8
         return np.round(result).astype(np.uint8)
-    
+
     def process_block_dct(self, block, cosines, block_size):
         """
         Apply DCT to a single block of size block_size x block_size.
         """
         return dct_block(block, cosines, block_size)
+
     def process_block_idct(self, block, cosines, block_size):
         """
         Apply IDCT to a single block of size block_size x block_size.

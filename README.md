@@ -1,7 +1,11 @@
 # VidKomp
 
+USE setup.ps1 to setup the project venv and dependencies
+-In order to start the GUI, the file player.mvp should be open
+
 # Architektur
-> [!NOTE] 
+
+> [!NOTE]
 > Manchmal kann die Mermaid Syntax in VSCode nicht angezeigt werden. Dafür einfach die Extension `Markdown Preview Mermaid Support` runterladen.
 
 Einfachshalber würde ich vorschlagen, dass der Player nur YUV und unser VID Format einlesen kann. Falls wir mehr Beipielvideos brauchen können wir ein belibiges Dateiformat in per `ffmpeg` in YUV konvertieren.

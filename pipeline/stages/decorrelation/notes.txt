@@ -1,15 +1,15 @@
-Qué pasa aquí?
-1.hacemos la separación de y,u,v + rgb
--hacemos esto para poder trabajar con los canales y,u,b y hacer decorrelacion en cada uno
--el rgb es una transformacion de estos para poder mostrarlo en el player
-2.En la predicción
--hacemos una predicción de 3 modos (vertical, horizontal y promedio)
--usamos 3 modos porque es medio rapido y no tan complejo
--a cada frame se lo separa en bloques (default 8)
--calculamos un padding para transformar el tamaño del frame(esto es para el caso en el que el tamaño del frame no sea divisible para el tamaño del bloque y as¿i no dejar pixeles sobrantes)
--los pixeles extra con el padding los inicializamos con 0
--luego cortamos el frame al tamaño original y esto no afecta a la decodificacion
--en cada bloque se evalua cual modo da menor error (error es original - predicción)
--el que modo que tiene menor error se guarda y se lo pasa como resultado
-//Lo paso en binario para poder pasarlo como matriz y no como string
-// es necesario pasarlo y guardarlo en el header porque se necesita para decodificar
+What happens here?
+1. We separate y, u, v + rgb
+- We do this to be able to work with the y, u, b channels and perform decorrelation on each one
+- The rgb is a transformation of these to be able to display it in the player
+2. In the prediction
+- We make a prediction of 3 modes (vertical, horizontal, and average)
+- We use 3 modes because it is fairly fast and not too complex
+- Each frame is divided into blocks (default 8)
+- We calculate a padding to transform the frame size (this is for the case where the frame size is not divisible by the block size, so as not to leave leftover pixels)
+- The extra pixels with the padding are initialized to 0
+- Then we cut the frame to the original size and this does not affect decoding
+- In each block, we evaluate which mode gives the lowest error (error is original - prediction)
+- The mode with the lowest error is saved and passed as the result
+// I pass it in binary to be able to pass it as a matrix and not as a string
+// It is necessary to pass and save it in the header because it is needed for decoding

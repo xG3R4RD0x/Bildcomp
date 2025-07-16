@@ -2,7 +2,7 @@ import numpy as np
 from numba import njit
 
 
-# --- Copia las funciones de predicción del encoder para asegurar simetría ---
+# --- Copy the encoder's prediction functions to ensure symmetry ---
 @njit(inline="always")
 def predict_vertical(data, i, j, borders=False, start_i=0, start_j=0):
     if not borders:
@@ -53,18 +53,22 @@ def predict_average(data, i, j, borders=False, start_i=0, start_j=0):
 
 class DecodePredictionStrategy:
     """
-    Decodifica los residuales en uint8 y reconstruye el frame original usando los mode flags.
-    Usa predicciones:
+    Decodes the residuals in uint8 and reconstructs the original frame using the mode flags.
+    Uses predictions:
     - 0b00: Vertical
     - 0b01: Horizontal
-    - 0b10: Promedio (Average)
+    - 0b10: Average
     """
 
     def __init__(self):
         pass
 
     def decode(
-        self, residuals: np.ndarray, mode_flags: np.ndarray, block_size: int = 8, borders: bool = False
+        self,
+        residuals: np.ndarray,
+        mode_flags: np.ndarray,
+        block_size: int = 8,
+        borders: bool = False,
     ) -> np.ndarray:
         height, width = residuals.shape
         reconstructed = np.zeros((height, width), dtype=np.uint8)
@@ -107,9 +111,12 @@ def _decode_block(residuals, reconstructed, i, j, block_h, block_w, mode_flag, b
             res = residuals[abs_i, abs_j]
             error = int(res) - 128
             reconstructed[abs_i, abs_j] = (int(pred) + error) % 256
-            
+
+
 @njit
-def _decode_block_float(residuals, reconstructed, i, j, block_h, block_w, mode_flag, borders):
+def _decode_block_float(
+    residuals, reconstructed, i, j, block_h, block_w, mode_flag, borders
+):
     for row in range(block_h):
         for col in range(block_w):
             abs_i = i + row
@@ -123,7 +130,7 @@ def _decode_block_float(residuals, reconstructed, i, j, block_h, block_w, mode_f
                 pred = predict_average(reconstructed, abs_i, abs_j, borders, i, j)
 
             res = residuals[abs_i, abs_j]
-            # Para float32 centrado en 0, no hay offset
+            # For float32 centered at 0, there is no offset
             val = int(round(pred + res))
             if val < 0:
                 val = 0
