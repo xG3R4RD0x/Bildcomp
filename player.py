@@ -27,20 +27,23 @@ class Video:
         self.height = 0
         self.frames = []
         self.bitrate_per_frame = []
-        self._load()
+        self.load()
 
     def calculate_bitrate(self):
-        FrameSize_bytes = self.width * self.height * 1.5 # 1.5 because 1 Y + 1/4 U + 1/4 V
-        bitrate = FrameSize_bytes * 8
+        '''
+        Used to calculate the bitrate of .yuv files
+        '''
+        frameSize_bytes = self.width * self.height * 1.5 # 1.5 because 1 Y + 1/4 U + 1/4 V
+        bitrate = frameSize_bytes * 8
         self.bitrate_per_frame.append(bitrate)
 
-    def _load(self):
+    def load(self):
         '''
-        Distinction between .yuv and .vid files
+        Distinction between .yuv, .vid and .finalcomp files
         '''
-        ds = DecorrelationStage()
         if self.path.endswith(".yuv"): 
             ''' YUV File handling '''
+            ds = DecorrelationStage()
             dims = self.path.split(".", 1)[0].split("_")[-1].split("x")
             self.width, self.height = int(dims[0]), int(dims[1])
             
@@ -59,8 +62,10 @@ class Video:
                     self.frames.append(img)
             t_end = time.time()
             print(f"Decoding time: {t_end - t_start:.8f} seconds")
+
         elif self.path.endswith(".vid"): 
-            ''' VID file handling '''
+            ''' VID File Handling '''
+            ds = DecorrelationStage()
             t_start = time.time()
             vid = mvp.Vid.read_from_file(self.path)
             self.width = vid.frame_width
@@ -77,11 +82,13 @@ class Video:
                 self.frames.append(img)
             t_end = time.time()
             print(f"Decoding time: {t_end - t_start:.8f} seconds")
+
         elif self.path.endswith(".finalcomp"):
             '''
-            Handling for Predcition algorithmus 
+            Handling for Predcition algorithm.
             The decompressing stage is hard coded to output a yuv file. We temporary save the file and load it into the player
             '''
+            ds = DecorrelationStage()
             t_start = time.time()
 
             if not os.path.exists(TEMP_YUV_STORAGE):
@@ -114,6 +121,9 @@ class Video:
             print(f"Decoding time: {t_end - t_start:.8f} seconds")
 
 class RadioDialog(simpledialog.Dialog):
+    '''
+    Dialog Window to choose the compression settings 
+    '''
     def __init__(self, parent, title, options):
         self.options = options
         self.selected = tk.StringVar(value=options[0])
@@ -255,10 +265,6 @@ class Player:
         )
         if path:
             self.load_video_file(path, side=side)
-            # if format == "yuv":
-            #     self.load_yuv_file(path)
-            # elif format == "vid":
-            #     self.load_vid_file(path)
 
     def set_quantization_level(self):
         value = simpledialog.askfloat("Quantization Level", "Enter quantization level:", minvalue=1.0, maxvalue=100.0)
@@ -291,10 +297,7 @@ class Player:
             except Exception as e:
                 print(f"Right video failed: {e}")
                 return
-            
-        if self.video_left and self.video_right:
-            self.precalculate_psnr()
-            
+                        
         self.video_id += 2
         self.jump_to_start()
         self.display_frames()
@@ -335,16 +338,13 @@ class Player:
             bitrate = self.video_right.bitrate_per_frame[self.frame_index_right] / 1000
             self.bitrate_label_right.config(text=f"Bitrate right side: {bitrate:.2f} kbpf")
 
-        if self.psnr_values:
-            if len(self.video_right.frames) > len(self.video_left.frames):
-                psnr = self.psnr_values[self.frame_index_right]
-            else:
-                psnr = self.psnr_values[self.frame_index_left]
+        if self.video_right and self.video_left:
+            psnr = self.calculate_psnr_of_frame(self.video_left.frames[self.frame_index_left], self.video_right.frames[self.frame_index_right])
             self.psnr_label.config(text=f"PSNR: {psnr:.2f} dB")
 
     def playback_loop(self):
         '''
-        Recursive function call for playing the next frame in the video.
+        Recursive function call for displaying the next frame in the video.
         Is toggled on and off with the play/pause button.
         '''
         if not self.is_playing:
@@ -429,7 +429,7 @@ class Player:
                     self.quantization_level = value
                     output_filepath = filedialog.asksaveasfilename(
                         defaultextension=".vid",
-                        filetypes=[("Vid files", "*.vid"), ("All files", "*.*" )],
+                        filetypes=[("All files", "*.*" )],
                         title="Save file as"
                     )
                     if output_filepath:
@@ -457,26 +457,18 @@ class Player:
         else: 
             print(f"Player on {side} side does not contain a file")
 
-    def precalculate_psnr(self) -> list:
-        '''
-        PSNR is always pre calculated when two videos are in the player. 
-        The 
-        '''
-        self.psnr_values = []
-        min_len = min(len(self.video_left.frames), len(self.video_right.frames))
-        max_len = max(len(self.video_left.frames), len(self.video_right.frames))
-        for i in range(min_len):
-            psnr = self.calculate_psnr_of_frame(self.video_left.frames[i], self.video_right.frames[i])
-            self.psnr_values.append(psnr)
-
-        for i in range(min_len, max_len):
-            self.psnr_values.append(0.0)
-
     def calculate_psnr_of_frame(self, frame_left, frame_right):
-        arr1 = np.asarray(frame_left).astype(np.float32)
-        arr2 = np.asarray(frame_right).astype(np.float32)
-        mse = np.mean((arr1 - arr2) ** 2)
-        return 20 * np.log10(255.0) - 10 * np.log10(mse)
+        '''
+        If the dimensions of two frames are identical, then the PSNR is calculated
+        '''
+        try:
+            arr1 = np.asarray(frame_left).astype(np.float32)
+            arr2 = np.asarray(frame_right).astype(np.float32)
+            mse = np.mean((arr1 - arr2) ** 2)
+            return 20 * np.log10(255.0) - 10 * np.log10(mse)
+        except Exception as e:
+            print(f"Frames do not have the same dimensions. {e}")
+            return 0.0
 
 if __name__ == "__main__":
     filename_arg = sys.argv[1] if len(sys.argv) >= 2 else None
