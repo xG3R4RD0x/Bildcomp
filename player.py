@@ -19,6 +19,7 @@ if os.path.exists(TEMP_YUV_STORAGE):
     for f in files:
         os.remove(f)
 
+
 class Video:
     def __init__(self, id, path):
         self.id = id
@@ -30,23 +31,25 @@ class Video:
         self.load()
 
     def calculate_bitrate(self):
-        '''
+        """
         Used to calculate the bitrate of .yuv files
-        '''
-        frameSize_bytes = self.width * self.height * 1.5 # 1.5 because 1 Y + 1/4 U + 1/4 V
+        """
+        frameSize_bytes = (
+            self.width * self.height * 1.5
+        )  # 1.5 because 1 Y + 1/4 U + 1/4 V
         bitrate = frameSize_bytes * 8
         self.bitrate_per_frame.append(bitrate)
 
     def load(self):
-        '''
+        """
         Distinction between .yuv, .vid and .finalcomp files
-        '''
-        if self.path.endswith(".yuv"): 
-            ''' YUV File handling '''
+        """
+        if self.path.endswith(".yuv"):
+            """YUV File handling"""
             ds = DecorrelationStage()
             dims = self.path.split(".", 1)[0].split("_")[-1].split("x")
             self.width, self.height = int(dims[0]), int(dims[1])
-            
+
             t_start = time.time()
             frame_size = self.width * self.height * 3 // 2  # YUV420p
 
@@ -63,8 +66,8 @@ class Video:
             t_end = time.time()
             print(f"Decoding time: {t_end - t_start:.8f} seconds")
 
-        elif self.path.endswith(".vid"): 
-            ''' VID File Handling '''
+        elif self.path.endswith(".vid"):
+            """VID File Handling"""
             ds = DecorrelationStage()
             t_start = time.time()
             vid = mvp.Vid.read_from_file(self.path)
@@ -84,20 +87,21 @@ class Video:
             print(f"Decoding time: {t_end - t_start:.8f} seconds")
 
         elif self.path.endswith(".finalcomp"):
-            '''
+            """
             Handling for Predcition algorithm.
             The decompressing stage is hard coded to output a yuv file. We temporary save the file and load it into the player
-            '''
+            """
             ds = DecorrelationStage()
             t_start = time.time()
 
-            if not os.path.exists(TEMP_YUV_STORAGE):
-                os.makedirs(TEMP_YUV_STORAGE)
+            decompressed_dir = os.path.join(os.path.dirname(self.path), "decompressed")
+            if not os.path.exists(decompressed_dir):
+                os.makedirs(decompressed_dir)
             cf = CompressorFinal()
-            cf.decompress_video(self.path, TEMP_YUV_STORAGE)
+            cf.decompress_video(self.path, decompressed_dir)
 
-            filename = os.path.basename(self.path).removesuffix('.finalcomp')
-            path_decompressed_yuv = TEMP_YUV_STORAGE + filename + ".yuv"
+            filename = os.path.basename(self.path).removesuffix(".finalcomp")
+            path_decompressed_yuv = os.path.join(decompressed_dir, filename + ".yuv")
             dims = path_decompressed_yuv.split(".", 1)[0].split("_")[-1].split("x")
             self.width, self.height = int(dims[0]), int(dims[1])
             frame_size = self.width * self.height * 3 // 2  # YUV420p
@@ -113,17 +117,19 @@ class Video:
                     if len(data) < frame_size:
                         break
                     components = ds.separate_yuv(data, self.width, self.height)
-                    #self.calculate_bitrate()
+                    # self.calculate_bitrate()
                     rgb = components["rgb"]
                     img = Image.fromarray(rgb, "RGB")
                     self.frames.append(img)
             t_end = time.time()
             print(f"Decoding time: {t_end - t_start:.8f} seconds")
 
+
 class RadioDialog(simpledialog.Dialog):
-    '''
-    Dialog Window to choose the compression settings 
-    '''
+    """
+    Dialog Window to choose the compression settings
+    """
+
     def __init__(self, parent, title, options):
         self.options = options
         self.selected = tk.StringVar(value=options[0])
@@ -132,10 +138,13 @@ class RadioDialog(simpledialog.Dialog):
     def body(self, master):
         tk.Label(master, text="Choose an option:").pack()
         for opt in self.options:
-            tk.Radiobutton(master, text=opt, variable=self.selected, value=opt).pack(anchor="w")
+            tk.Radiobutton(master, text=opt, variable=self.selected, value=opt).pack(
+                anchor="w"
+            )
 
     def apply(self):
         self.result = self.selected.get()
+
 
 class Player:
     def __init__(self, root, filename=None):
@@ -159,24 +168,36 @@ class Player:
             self.load_video_file(filename, side="left")
 
     def build_gui(self):
-        '''
+        """
         Builds all the UI elements in the GUI and arranges them
-        '''
+        """
         self.top_frame = tk.Frame(self.root)
         self.top_frame.pack(side="top", anchor="nw", fill="x")
 
         file_menu_btn = tk.Menubutton(self.top_frame, text="File", relief=tk.RAISED)
         file_menu = tk.Menu(file_menu_btn, tearoff=0)
-        file_menu.add_command(label="Load Left Video", command=lambda: self.menu_load_file("left"))
-        file_menu.add_command(label="Load Right Video", command=lambda: self.menu_load_file("right"))
-        file_menu.add_command(label="Save left side as...", command=lambda: self.menu_save_file("left"))
-        file_menu.add_command(label="Save right side as...", command=lambda: self.menu_save_file("right"))
+        file_menu.add_command(
+            label="Load Left Video", command=lambda: self.menu_load_file("left")
+        )
+        file_menu.add_command(
+            label="Load Right Video", command=lambda: self.menu_load_file("right")
+        )
+        file_menu.add_command(
+            label="Save left side as...", command=lambda: self.menu_save_file("left")
+        )
+        file_menu.add_command(
+            label="Save right side as...", command=lambda: self.menu_save_file("right")
+        )
         file_menu_btn.config(menu=file_menu)
         file_menu_btn.pack(side="left", padx=2, pady=2)
 
-        options_menu_btn = tk.Menubutton(self.top_frame, text="Options", relief=tk.RAISED)
+        options_menu_btn = tk.Menubutton(
+            self.top_frame, text="Options", relief=tk.RAISED
+        )
         options_menu = tk.Menu(options_menu_btn, tearoff=0)
-        options_menu.add_command(label="Chosse encoding algorithm", command=self.set_quantization_level)
+        options_menu.add_command(
+            label="Chosse encoding algorithm", command=self.set_quantization_level
+        )
         options_menu_btn.config(menu=options_menu)
         options_menu_btn.pack(side="left", padx=0, pady=0)
 
@@ -184,7 +205,7 @@ class Player:
         self.main_frame.pack(side="top", anchor="nw", fill="x", expand=True)
 
         self.video_frame = tk.Frame(self.main_frame)
-        self.video_frame.pack(side="top", anchor= "nw", padx=0)
+        self.video_frame.pack(side="top", anchor="nw", padx=0)
         self.left_video_frame = tk.Frame(self.video_frame)
         self.left_video_frame.pack(side="left", anchor="nw", padx=0, pady=0)
         self.right_video_frame = tk.Frame(self.video_frame)
@@ -199,7 +220,7 @@ class Player:
             text="Left Side \n(The original YUV file)",
             font=("Arial", 14),
             bg="#E0E0E0",
-            relief="ridge"
+            relief="ridge",
         )
         self.placeholder_left.pack()
 
@@ -212,33 +233,47 @@ class Player:
             text="Right Side \n(Our commpressed VID file)",
             font=("Arial", 14),
             bg="#E0E0E0",
-            relief="ridge"
+            relief="ridge",
         )
         self.placeholder_right.pack()
 
-
         self.control_frame = tk.Frame(self.left_video_frame)
-        self.start_btn = tk.Button(self.control_frame, text="|<", command=self.jump_to_start)
-        self.prev_btn = tk.Button(self.control_frame, text= "<<", command=self.step_back)
-        self.play_btn = tk.Button(self.control_frame, text="Play", width=5, command=self.toggle_play)
-        self.next_btn = tk.Button(self.control_frame, text= ">>", command=self.step_forward)
-        self.end_btn = tk.Button(self.control_frame, text=">|", command=self.jump_to_end)
+        self.start_btn = tk.Button(
+            self.control_frame, text="|<", command=self.jump_to_start
+        )
+        self.prev_btn = tk.Button(self.control_frame, text="<<", command=self.step_back)
+        self.play_btn = tk.Button(
+            self.control_frame, text="Play", width=5, command=self.toggle_play
+        )
+        self.next_btn = tk.Button(
+            self.control_frame, text=">>", command=self.step_forward
+        )
+        self.end_btn = tk.Button(
+            self.control_frame, text=">|", command=self.jump_to_end
+        )
 
-        
         self.info_frame = tk.Frame(self.main_frame, width=0)
         self.left_info_frame = tk.Frame(self.info_frame, width=500)
         self.psnr_label = tk.Label(self.left_info_frame, text="PSNR: -")
-        self.bitrate_label_left = tk.Label(self.left_info_frame, text="Bitrate left side: -")
-        self.bitrate_label_right = tk.Label(self.left_info_frame, text="Bitrate right side: -")
-        self.frame_label_left = tk.Label(self.left_info_frame, text="Frame left side: -")
-        self.frame_label_right = tk.Label(self.left_info_frame, text="Frame right side: -")
-        #self.right_info_frame = tk.Frame(self.info_frame, width=300, background="red")
-        #self.right_info_frame.pack(side="left", anchor="nw", padx=0)
+        self.bitrate_label_left = tk.Label(
+            self.left_info_frame, text="Bitrate left side: -"
+        )
+        self.bitrate_label_right = tk.Label(
+            self.left_info_frame, text="Bitrate right side: -"
+        )
+        self.frame_label_left = tk.Label(
+            self.left_info_frame, text="Frame left side: -"
+        )
+        self.frame_label_right = tk.Label(
+            self.left_info_frame, text="Frame right side: -"
+        )
+        # self.right_info_frame = tk.Frame(self.info_frame, width=300, background="red")
+        # self.right_info_frame.pack(side="left", anchor="nw", padx=0)
 
     def show_controls(self):
-        '''
+        """
         Show some GUI elements (play, pause,...) only when a Video is loaded in the player
-        '''
+        """
         self.control_frame.pack(pady=2, anchor="nw")
         self.start_btn.pack(side="left", padx=2)
         self.prev_btn.pack(side="left", padx=2)
@@ -249,9 +284,9 @@ class Player:
     def show_info_panel(self):
         self.info_frame.pack(side="top", anchor="nw", padx=0)
         self.left_info_frame.pack(side="left", anchor="nw")
-        self.psnr_label.pack(anchor='nw')
-        self.bitrate_label_left.pack(anchor='nw')
-        self.bitrate_label_right.pack(anchor='nw')
+        self.psnr_label.pack(anchor="nw")
+        self.bitrate_label_left.pack(anchor="nw")
+        self.bitrate_label_right.pack(anchor="nw")
         self.frame_label_left.pack(anchor="nw", padx=0)
         self.frame_label_right.pack(anchor="nw", padx=0)
 
@@ -260,26 +295,32 @@ class Player:
 
     def menu_load_file(self, side):
         path = filedialog.askopenfilename(
-            initialdir=ROOT_DIR,
-            filetypes=[("All files", "*.*")]
+            initialdir=ROOT_DIR, filetypes=[("All files", "*.*")]
         )
         if path:
             self.load_video_file(path, side=side)
 
     def set_quantization_level(self):
-        value = simpledialog.askfloat("Quantization Level", "Enter quantization level:", minvalue=1.0, maxvalue=100.0)
+        value = simpledialog.askfloat(
+            "Quantization Level",
+            "Enter quantization level:",
+            minvalue=1.0,
+            maxvalue=100.0,
+        )
         if value is not None:
             self.quantization_level = value
         print(self.quantization_level)
         return value
 
     def load_video_file(self, path, side):
-        '''
+        """
         Handle if the video is shown on the left or right side
-        '''
+        """
         if side == "left":
             self.placeholder_left.destroy()
-            self.image_player_left.config(image="", text="Loading...", font=("Arial", 20), compound="center")
+            self.image_player_left.config(
+                image="", text="Loading...", font=("Arial", 20), compound="center"
+            )
             self.root.update()
             try:
                 self.video_left = Video(self.video_id, path)
@@ -289,7 +330,9 @@ class Player:
                 return
         elif side == "right":
             self.placeholder_right.destroy()
-            self.image_player_right.config(image="", text="Loading...", font=("Arial", 20), compound="center")
+            self.image_player_right.config(
+                image="", text="Loading...", font=("Arial", 20), compound="center"
+            )
             self.root.update()
             try:
                 self.video_right = Video(self.video_id + 1, path)
@@ -297,7 +340,7 @@ class Player:
             except Exception as e:
                 print(f"Right video failed: {e}")
                 return
-                        
+
         self.video_id += 2
         self.jump_to_start()
         self.display_frames()
@@ -305,23 +348,27 @@ class Player:
         self.show_info_panel()
 
     def display_frames(self):
-        '''
+        """
         Updates the UI elements to show the videoframe and its current statistics
-        '''
+        """
         if self.video_left and self.video_left.frames:
             frame = self.video_left.frames[self.frame_index_left]
             img = ImageTk.PhotoImage(frame)
             self.image_player_left.config(image=img, text="", compound=None)
             self.image_player_left.image = img
-            
+
             # Show video statistics
             frame_info_left = f"Frame left side: {self.frame_index_left if self.video_left else '-'} / "
-            frame_info_left += f"{(len(self.video_left.frames) - 1) if self.video_left else '-'}"
+            frame_info_left += (
+                f"{(len(self.video_left.frames) - 1) if self.video_left else '-'}"
+            )
             self.frame_label_left.config(text=frame_info_left)
 
             # Bitrate
             bitrate = self.video_left.bitrate_per_frame[self.frame_index_left] / 1000
-            self.bitrate_label_left.config(text=f"Bitrate left side: {bitrate:.2f} kbpf")
+            self.bitrate_label_left.config(
+                text=f"Bitrate left side: {bitrate:.2f} kbpf"
+            )
 
         if self.video_right and self.video_right.frames:
             frame = self.video_right.frames[self.frame_index_right]
@@ -331,29 +378,40 @@ class Player:
 
             # Show video statistics
             frame_info_right = f"Frame right side: {self.frame_index_right if self.video_right else '-'} / "
-            frame_info_right += f"{(len(self.video_right.frames) - 1) if self.video_right else '-'}"
+            frame_info_right += (
+                f"{(len(self.video_right.frames) - 1) if self.video_right else '-'}"
+            )
             self.frame_label_right.config(text=frame_info_right)
 
             # Bitrate
             bitrate = self.video_right.bitrate_per_frame[self.frame_index_right] / 1000
-            self.bitrate_label_right.config(text=f"Bitrate right side: {bitrate:.2f} kbpf")
+            self.bitrate_label_right.config(
+                text=f"Bitrate right side: {bitrate:.2f} kbpf"
+            )
 
         if self.video_right and self.video_left:
-            psnr = self.calculate_psnr_of_frame(self.video_left.frames[self.frame_index_left], self.video_right.frames[self.frame_index_right])
+            psnr = self.calculate_psnr_of_frame(
+                self.video_left.frames[self.frame_index_left],
+                self.video_right.frames[self.frame_index_right],
+            )
             self.psnr_label.config(text=f"PSNR: {psnr:.2f} dB")
 
     def playback_loop(self):
-        '''
+        """
         Recursive function call for displaying the next frame in the video.
         Is toggled on and off with the play/pause button.
-        '''
+        """
         if not self.is_playing:
             return
 
         if self.video_left:
-            self.frame_index_left = (self.frame_index_left + 1) % len(self.video_left.frames)
+            self.frame_index_left = (self.frame_index_left + 1) % len(
+                self.video_left.frames
+            )
         if self.video_right:
-            self.frame_index_right = (self.frame_index_right + 1) % len(self.video_right.frames)
+            self.frame_index_right = (self.frame_index_right + 1) % len(
+                self.video_right.frames
+            )
 
         self.display_frames()
         self.after_id = self.root.after(1000 // FPS, self.playback_loop)
@@ -375,17 +433,25 @@ class Player:
     def step_back(self):
         self.stop_playback()
         if self.video_left:
-            self.frame_index_left = (self.frame_index_left - 1) % len(self.video_left.frames)
+            self.frame_index_left = (self.frame_index_left - 1) % len(
+                self.video_left.frames
+            )
         if self.video_right:
-            self.frame_index_right = (self.frame_index_right - 1) % len(self.video_right.frames)
+            self.frame_index_right = (self.frame_index_right - 1) % len(
+                self.video_right.frames
+            )
         self.display_frames()
 
     def step_forward(self):
         self.stop_playback()
         if self.video_left:
-            self.frame_index_left = (self.frame_index_left + 1) % len(self.video_left.frames)
+            self.frame_index_left = (self.frame_index_left + 1) % len(
+                self.video_left.frames
+            )
         if self.video_right:
-            self.frame_index_right = (self.frame_index_right + 1) % len(self.video_right.frames)
+            self.frame_index_right = (self.frame_index_right + 1) % len(
+                self.video_right.frames
+            )
         self.display_frames()
 
     def jump_to_start(self):
@@ -399,9 +465,9 @@ class Player:
     def jump_to_end(self):
         self.stop_playback()
         if self.video_left:
-            self.frame_index_left = len(self.video_left.frames) -1
+            self.frame_index_left = len(self.video_left.frames) - 1
         if self.video_right:
-            self.frame_index_right = len(self.video_right.frames) -1
+            self.frame_index_right = len(self.video_right.frames) - 1
         self.display_frames()
 
     def toggle_play(self):
@@ -411,9 +477,9 @@ class Player:
             self.start_playback()
 
     def menu_save_file(self, side):
-        '''
+        """
         Opens compression settings and then save a file into a specified folder
-        '''
+        """
         if side == "left":
             video_to_save = self.video_left
         elif side == "right":
@@ -421,25 +487,34 @@ class Player:
 
         if video_to_save:
             list_of_comps = ["DCT", "Prediction"]
-            comp_dialog = RadioDialog(root, "Select a compression algorithm", list_of_comps)
+            comp_dialog = RadioDialog(
+                root, "Select a compression algorithm", list_of_comps
+            )
             print("Selected:", comp_dialog.result)
-            if comp_dialog.result == list_of_comps[0]: # dct
+            if comp_dialog.result == list_of_comps[0]:  # dct
                 value = self.set_quantization_level()
                 if value is not None:
                     self.quantization_level = value
                     output_filepath = filedialog.asksaveasfilename(
                         defaultextension=".vid",
-                        filetypes=[("All files", "*.*" )],
-                        title="Save file as"
+                        filetypes=[("All files", "*.*")],
+                        title="Save file as",
                     )
                     if output_filepath:
                         t_start = time.time()
                         print("Compressing...")
-                        video_to_save_metadata = mvp.RawYUVMetadata(video_to_save.width, video_to_save.height, 25)
-                        mvp.compress_and_save_to_file(video_to_save.path, video_to_save_metadata, output_filepath, self.quantization_level)
+                        video_to_save_metadata = mvp.RawYUVMetadata(
+                            video_to_save.width, video_to_save.height, 25
+                        )
+                        mvp.compress_and_save_to_file(
+                            video_to_save.path,
+                            video_to_save_metadata,
+                            output_filepath,
+                            self.quantization_level,
+                        )
                         t_end = time.time()
                         print(f"Encoding time: {t_end - t_start:.8f} seconds")
-            elif comp_dialog.result == list_of_comps[1]: # prediction
+            elif comp_dialog.result == list_of_comps[1]:  # prediction
                 value = self.set_quantization_level()
                 if value is not None:
                     self.quantization_level = int(value)
@@ -450,17 +525,24 @@ class Player:
                         t_start = time.time()
                         print("Compressing...")
                         cf = CompressorFinal()
-                        cf.compress_video(video_path=video_to_save.path, output_path=output_filepath, height= video_to_save.height, width=video_to_save.width, block_size=8, levels=self.quantization_level)
-                        #mvp.compress_and_save_to_file(video_to_save.path, output_filepath, self.quantization_level)
+                        cf.compress_video(
+                            video_path=video_to_save.path,
+                            output_path=output_filepath,
+                            height=video_to_save.height,
+                            width=video_to_save.width,
+                            block_size=8,
+                            levels=self.quantization_level,
+                        )
+                        # mvp.compress_and_save_to_file(video_to_save.path, output_filepath, self.quantization_level)
                         t_end = time.time()
                         print(f"Encoding time: {t_end - t_start:.8f} seconds")
-        else: 
+        else:
             print(f"Player on {side} side does not contain a file")
 
     def calculate_psnr_of_frame(self, frame_left, frame_right):
-        '''
+        """
         If the dimensions of two frames are identical, then the PSNR is calculated
-        '''
+        """
         try:
             arr1 = np.asarray(frame_left).astype(np.float32)
             arr2 = np.asarray(frame_right).astype(np.float32)
@@ -470,9 +552,9 @@ class Player:
             print(f"Frames do not have the same dimensions. {e}")
             return 0.0
 
+
 if __name__ == "__main__":
     filename_arg = sys.argv[1] if len(sys.argv) >= 2 else None
     root = tk.Tk()
     app = Player(root, filename_arg)
     root.mainloop()
-

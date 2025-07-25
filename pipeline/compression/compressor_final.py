@@ -3,17 +3,31 @@ from numba import njit
 import numpy as np
 
 from pipeline.stages.bitwriter.bitwritter import BitWriter
-from pipeline.stages.decorrelation.strategy.decode_prediction_strategy import _decode_block_float
-from pipeline.stages.decorrelation.strategy.prediction_strategy import _to_mode_flag, find_best_mode_and_residuals_float, find_best_mode_and_residuals_uint8
-from pipeline.stages.decorrelation.strategy.transformation_strategy import dct_block, idct_block, precompute_cosines
+from pipeline.stages.decorrelation.strategy.decode_prediction_strategy import (
+    _decode_block_float,
+)
+from pipeline.stages.decorrelation.strategy.prediction_strategy import (
+    _to_mode_flag,
+    find_best_mode_and_residuals_float,
+    find_best_mode_and_residuals_uint8,
+)
+from pipeline.stages.decorrelation.strategy.transformation_strategy import (
+    dct_block,
+    idct_block,
+    precompute_cosines,
+)
 from pipeline.stages.quantization.quantization_stage import dequantize, quantize
-from pipeline.stages.entropie.huffmann_codierung import huffman_encode_frame, huffman_decode_frame
+from pipeline.stages.entropie.huffmann_codierung import (
+    huffman_encode_frame,
+    huffman_decode_frame,
+)
 
 
 class CompressorFinal:
     """
     Final version of the video compressor with all features integrated.
     """
+
     def __init__(self):
         self._bitrate = None
 
@@ -23,12 +37,14 @@ class CompressorFinal:
     def set_bitrate(self, value):
         self._bitrate = value
 
-    def calculate_and_set_bitrate_per_frame(self, encoded_blocks_yuv, pads_yuv, width, height):
+    def calculate_and_set_bitrate_per_frame(
+        self, encoded_blocks_yuv, pads_yuv, width, height
+    ):
         """
         Calculates the bitrate (bits per pixel) for a single frame given the encoded blocks and pads for Y, U, V.
         Updates the internal _bitrate list (one value per frame).
         """
-        if not hasattr(self, '_bitrate') or self._bitrate is None:
+        if not hasattr(self, "_bitrate") or self._bitrate is None:
             self._bitrate = []
         # encoded_blocks_yuv: list of lists of bytes [Y_blocks, U_blocks, V_blocks]
         # pads_yuv: list of lists of int [Y_pads, U_pads, V_pads]
@@ -44,8 +60,15 @@ class CompressorFinal:
     def reset_bitrate(self):
         self._bitrate = []
 
-
-    def compress_video(self, video_path: str, output_path: str, height: int, width: int, block_size: int, levels: int):
+    def compress_video(
+        self,
+        video_path: str,
+        output_path: str,
+        height: int,
+        width: int,
+        block_size: int,
+        levels: int,
+    ):
         """
         Compresses a raw YUV video and saves it in binary format using BitWriter.
         """
@@ -60,18 +83,23 @@ class CompressorFinal:
             height=height,
             block_size=block_size,
             levels=levels,
-            cosines=cosines
+            cosines=cosines,
         )
 
         # Create output folder if it does not exist
         os.makedirs(output_path, exist_ok=True)
         filename = os.path.basename(video_path)
-        output_file = os.path.join(output_path, f"{os.path.splitext(filename)[0]}.finalcomp")
+        output_file = os.path.join(
+            output_path, f"{os.path.splitext(filename)[0]}.finalcomp"
+        )
 
         # Write the compressed file using BitWriter
         writer = BitWriter(output_file)
         num_frames = len(processed_video)
-        writer.write_compressed_video(processed_video, width, height, num_frames, block_size, levels)
+        writer.write_compressed_video(
+            processed_video, width, height, num_frames, block_size, levels
+        )
+        print(f"average bitrate: {np.mean(self.get_bitrate()):.4f} bits/pixel")
         print(f"[compress_video] compressed file written in: {output_file}")
 
     def decompress_video(self, compressed_path: str, output_path: str):
@@ -91,14 +119,25 @@ class CompressorFinal:
         # Deserialize the compressed data
         frames, width, height, num_frames, block_size, levels = compressed_data
         cosines = precompute_cosines(block_size)
-        decompressed_video = self.process_video_decompression(frames, width, height, num_frames, block_size, levels, cosines)
+        decompressed_video = self.process_video_decompression(
+            frames, width, height, num_frames, block_size, levels, cosines
+        )
+        print(f"average bitrate: {np.mean(self.get_bitrate()):.4f} bits/pixel")
 
         # Write the reconstructed video
         writer = BitWriter(output_file)
         writer.write_reconstructed_video(decompressed_video)
         print(f"[decompress_video] Decompressed file written in: {output_file}")
 
-    def process_video_compression(self, video_data: np.ndarray, width: int, height: int, block_size: int, levels: int, cosines: np.ndarray):
+    def process_video_compression(
+        self,
+        video_data: np.ndarray,
+        width: int,
+        height: int,
+        block_size: int,
+        levels: int,
+        cosines: np.ndarray,
+    ):
         """
         Receives a raw YUV420 video (np.ndarray 1D uint8), splits it into frames, separa canales, aplica compress_frame_test y luego Huffman por frame/canal.
         Devuelve una lista de resultados comprimidos por frame y canal: [[(encoded_blocks, huff_table, pads, shape, mode_flags, min_vals, steps), ...], ...]
@@ -114,9 +153,13 @@ class CompressorFinal:
             frame_end = frame_start + frame_size
             frame_bytes = video_data[frame_start:frame_end]
             # Separate YUV channels (assuming planar)
-            y = frame_bytes[:width*height].reshape((height, width))
-            u = frame_bytes[width*height:width*height + width_uv*height_uv].reshape((height_uv, width_uv))
-            v = frame_bytes[width*height + width_uv*height_uv:].reshape((height_uv, width_uv))
+            y = frame_bytes[: width * height].reshape((height, width))
+            u = frame_bytes[
+                width * height : width * height + width_uv * height_uv
+            ].reshape((height_uv, width_uv))
+            v = frame_bytes[width * height + width_uv * height_uv :].reshape(
+                (height_uv, width_uv)
+            )
 
             # Padding for each channel
             padded_w_y = ((width + block_size - 1) // block_size) * block_size
@@ -124,9 +167,36 @@ class CompressorFinal:
             padded_w_uv = ((width_uv + block_size - 1) // block_size) * block_size
             padded_h_uv = ((height_uv + block_size - 1) // block_size) * block_size
 
-            y_out = compress_frame_test(y.flatten(), width, height, padded_w_y, padded_h_y, block_size, levels, cosines)
-            u_out = compress_frame_test(u.flatten(), width_uv, height_uv, padded_w_uv, padded_h_uv, block_size, levels, cosines)
-            v_out = compress_frame_test(v.flatten(), width_uv, height_uv, padded_w_uv, padded_h_uv, block_size, levels, cosines)
+            y_out = compress_frame_test(
+                y.flatten(),
+                width,
+                height,
+                padded_w_y,
+                padded_h_y,
+                block_size,
+                levels,
+                cosines,
+            )
+            u_out = compress_frame_test(
+                u.flatten(),
+                width_uv,
+                height_uv,
+                padded_w_uv,
+                padded_h_uv,
+                block_size,
+                levels,
+                cosines,
+            )
+            v_out = compress_frame_test(
+                v.flatten(),
+                width_uv,
+                height_uv,
+                padded_w_uv,
+                padded_h_uv,
+                block_size,
+                levels,
+                cosines,
+            )
 
             # y_out, u_out, v_out: (processed_blocks, mode_flags, min_vals, steps)
             frame_result = []
@@ -135,18 +205,51 @@ class CompressorFinal:
             for out in [y_out, u_out, v_out]:
                 processed_blocks, mode_flags, min_vals, steps = out
                 # Codifica solo los processed_blocks con Huffman por frame/canal
-                blocks_array = np.array([[processed_blocks[by, bx] for bx in range(processed_blocks.shape[1])] for by in range(processed_blocks.shape[0])])
-                encoded_blocks, huff_table, pads, shape = huffman_encode_frame(blocks_array)
-                frame_result.append((encoded_blocks, huff_table, pads, shape, mode_flags, min_vals, steps))
+                blocks_array = np.array(
+                    [
+                        [
+                            processed_blocks[by, bx]
+                            for bx in range(processed_blocks.shape[1])
+                        ]
+                        for by in range(processed_blocks.shape[0])
+                    ]
+                )
+                encoded_blocks, huff_table, pads, shape = huffman_encode_frame(
+                    blocks_array
+                )
+                frame_result.append(
+                    (
+                        encoded_blocks,
+                        huff_table,
+                        pads,
+                        shape,
+                        mode_flags,
+                        min_vals,
+                        steps,
+                    )
+                )
                 encoded_blocks_yuv.append(encoded_blocks)
                 pads_yuv.append(pads)
             # Calcular y guardar el bitrate de este frame
-            self.calculate_and_set_bitrate_per_frame(encoded_blocks_yuv, pads_yuv, width, height)
+            self.calculate_and_set_bitrate_per_frame(
+                encoded_blocks_yuv, pads_yuv, width, height
+            )
             results.append(frame_result)
-            print(f"compressed frame {frame_idx + 1}/{num_frames} | bitrate: {self.get_bitrate()[-1]:.4f} bits/pixel")
+            print(
+                f"compressed frame {frame_idx + 1}/{num_frames} | bitrate: {self.get_bitrate()[-1]:.4f} bits/pixel"
+            )
         return results
 
-    def process_video_decompression(self, frames, width: int, height: int, num_frames: int, block_size: int, levels: int, cosines: np.ndarray):
+    def process_video_decompression(
+        self,
+        frames,
+        width: int,
+        height: int,
+        num_frames: int,
+        block_size: int,
+        levels: int,
+        cosines: np.ndarray,
+    ):
         """
         Recibe la estructura deserializada (frames) y metadatos,
         decodifica Huffman por frame/canal y reconstruye el video YUV (np.ndarray 1D uint8).
@@ -165,34 +268,75 @@ class CompressorFinal:
             # Extrae pads de cada canal
             encoded_blocks_yuv = [y_tuple[0], u_tuple[0], v_tuple[0]]
             pads_yuv = [y_tuple[2], u_tuple[2], v_tuple[2]]
-            self.calculate_and_set_bitrate_per_frame(encoded_blocks_yuv, pads_yuv, width, height)
+            self.calculate_and_set_bitrate_per_frame(
+                encoded_blocks_yuv, pads_yuv, width, height
+            )
 
-            y_blocks = huffman_decode_frame(y_tuple[0], y_tuple[1], y_tuple[2], y_tuple[3])
-            u_blocks = huffman_decode_frame(u_tuple[0], u_tuple[1], u_tuple[2], u_tuple[3])
-            v_blocks = huffman_decode_frame(v_tuple[0], v_tuple[1], v_tuple[2], v_tuple[3])
+            y_blocks = huffman_decode_frame(
+                y_tuple[0], y_tuple[1], y_tuple[2], y_tuple[3]
+            )
+            u_blocks = huffman_decode_frame(
+                u_tuple[0], u_tuple[1], u_tuple[2], u_tuple[3]
+            )
+            v_blocks = huffman_decode_frame(
+                v_tuple[0], v_tuple[1], v_tuple[2], v_tuple[3]
+            )
+
             # Reconstruye processed_blocks como np.ndarray
             def blocks_to_array(blocks):
                 n_blocks_y = len(blocks)
                 n_blocks_x = len(blocks[0])
                 block_size = blocks[0][0].shape[0]
-                arr = np.empty((n_blocks_y, n_blocks_x, block_size, block_size), dtype=np.uint8)
+                arr = np.empty(
+                    (n_blocks_y, n_blocks_x, block_size, block_size), dtype=np.uint8
+                )
                 for by in range(n_blocks_y):
                     for bx in range(n_blocks_x):
                         arr[by, bx] = blocks[by][bx]
                 return arr
+
             y_processed = blocks_to_array(y_blocks)
             u_processed = blocks_to_array(u_blocks)
             v_processed = blocks_to_array(v_blocks)
             # Reconstruye el frame usando los metadatos
-            y_rec = decompress_frame_test((y_processed, y_tuple[4], y_tuple[5], y_tuple[6]), width, height, block_size, levels, cosines)
-            u_rec = decompress_frame_test((u_processed, u_tuple[4], u_tuple[5], u_tuple[6]), width_uv, height_uv, block_size, levels, cosines)
-            v_rec = decompress_frame_test((v_processed, v_tuple[4], v_tuple[5], v_tuple[6]), width_uv, height_uv, block_size, levels, cosines)
+            y_rec = decompress_frame_test(
+                (y_processed, y_tuple[4], y_tuple[5], y_tuple[6]),
+                width,
+                height,
+                block_size,
+                levels,
+                cosines,
+            )
+            u_rec = decompress_frame_test(
+                (u_processed, u_tuple[4], u_tuple[5], u_tuple[6]),
+                width_uv,
+                height_uv,
+                block_size,
+                levels,
+                cosines,
+            )
+            v_rec = decompress_frame_test(
+                (v_processed, v_tuple[4], v_tuple[5], v_tuple[6]),
+                width_uv,
+                height_uv,
+                block_size,
+                levels,
+                cosines,
+            )
             start = frame_idx * frame_size
-            output[start:start + width*height] = y_rec.flatten()
-            output[start + width*height : start + width*height + width_uv*height_uv] = u_rec.flatten()
-            output[start + width*height + width_uv*height_uv : start + frame_size] = v_rec.flatten()
-            print(f"decompressed frame {frame_idx + 1}/{num_frames} | bitrate: {self.get_bitrate()[-1]:.4f} bits/pixel")
+            output[start : start + width * height] = y_rec.flatten()
+            output[
+                start + width * height : start + width * height + width_uv * height_uv
+            ] = u_rec.flatten()
+            output[
+                start + width * height + width_uv * height_uv : start + frame_size
+            ] = v_rec.flatten()
+            print(
+                f"decompressed frame {frame_idx + 1}/{num_frames} | bitrate: {self.get_bitrate()[-1]:.4f} bits/pixel"
+            )
         return output
+
+
 @njit
 def compress_frame_test(
     frame_data: bytes,
@@ -202,15 +346,21 @@ def compress_frame_test(
     padded_h: int,
     block_size: int,
     levels: int,
-    cosines: np.ndarray
+    cosines: np.ndarray,
 ):
     """
     Processes a frame using prediction + DCT + quantization compression.
     Updates the working frame with the reconstructed block after each block.
     """
-    assert padded_w >= width, f"[compress_frame] padded_w ({padded_w}) < width ({width})"
-    assert padded_h >= height, f"[compress_frame] padded_h ({padded_h}) < height ({height})"
-    assert len(frame_data) == width * height, f"[compress_frame] frame_data size ({len(frame_data)}) does not match width*height ({width*height})"
+    assert (
+        padded_w >= width
+    ), f"[compress_frame] padded_w ({padded_w}) < width ({width})"
+    assert (
+        padded_h >= height
+    ), f"[compress_frame] padded_h ({padded_h}) < height ({height})"
+    assert (
+        len(frame_data) == width * height
+    ), f"[compress_frame] frame_data size ({len(frame_data)}) does not match width*height ({width*height})"
 
     # 1. Convert frame data to numpy array
     frame = np.frombuffer(frame_data, dtype=np.uint8)
@@ -225,7 +375,9 @@ def compress_frame_test(
     n_blocks_x = padded_w // block_size
 
     # 4. Preallocate arrays for the results
-    processed_blocks = np.empty((n_blocks_y, n_blocks_x, block_size, block_size), dtype=np.uint8)
+    processed_blocks = np.empty(
+        (n_blocks_y, n_blocks_x, block_size, block_size), dtype=np.uint8
+    )
     mode_flags = np.empty((n_blocks_y, n_blocks_x), dtype=np.uint8)
     min_vals = np.empty((n_blocks_y, n_blocks_x), dtype=np.float32)
     steps = np.empty((n_blocks_y, n_blocks_x), dtype=np.float32)
@@ -234,16 +386,21 @@ def compress_frame_test(
         for bx in range(n_blocks_x):
             y = by * block_size
             x = bx * block_size
-            block = padded_frame[y:y+block_size, x:x+block_size]
-            assert block.shape == (block_size, block_size), f"[compress_frame] Block shape mismatch at ({by},{bx}): {block.shape}"
+            block = padded_frame[y : y + block_size, x : x + block_size]
+            assert block.shape == (
+                block_size,
+                block_size,
+            ), f"[compress_frame] Block shape mismatch at ({by},{bx}): {block.shape}"
 
-            quantized_dct_residual, reconstructed_block, mode_flag, min_val, step = compress_block_prediction_dct_and_quant(
-                block,
-                i_start=0,
-                j_start=0,
-                block_size=block_size,
-                levels=levels,
-                cosines=cosines
+            quantized_dct_residual, reconstructed_block, mode_flag, min_val, step = (
+                compress_block_prediction_dct_and_quant(
+                    block,
+                    i_start=0,
+                    j_start=0,
+                    block_size=block_size,
+                    levels=levels,
+                    cosines=cosines,
+                )
             )
             # Store only the quantized block (as uint8 for storage)
             processed_blocks[by, bx] = quantized_dct_residual.astype(np.uint8)
@@ -264,6 +421,7 @@ def compress_frame_test(
     # Returns tuples of arrays
     return processed_blocks, mode_flags, min_vals, steps
 
+
 @njit
 def decompress_frame_test(
     frame_data: tuple,
@@ -271,7 +429,7 @@ def decompress_frame_test(
     height: int,
     block_size: int,
     levels: int,
-    cosines: np.ndarray
+    cosines: np.ndarray,
 ) -> np.ndarray:
     """
     Decompresses a full frame from the compressed data (prediction + DCT + quantization)
@@ -298,18 +456,16 @@ def decompress_frame_test(
             step = steps[by, bx]
 
             decompressed_block = decompress_block_prediction_dct_and_quant(
-                quantized_block,
-                mode_flag,
-                min_val,
-                step,
-                cosines,
-                block_size
+                quantized_block, mode_flag, min_val, step, cosines, block_size
             )
 
-            reconstructed_frame[y:y+block_size, x:x+block_size] = decompressed_block[:block_size, :block_size]
+            reconstructed_frame[y : y + block_size, x : x + block_size] = (
+                decompressed_block[:block_size, :block_size]
+            )
 
     # Crop the frame to its original size and return as uint8
     return reconstructed_frame[:height, :width].astype(np.uint8)
+
 
 @njit
 def compress_block_prediction_dct_and_quant(
@@ -318,13 +474,13 @@ def compress_block_prediction_dct_and_quant(
     j_start: int,
     block_size: int,
     levels: int,
-    cosines: np.ndarray
+    cosines: np.ndarray,
 ):
     """
     Applies prediction, then DCT to the residual, quantization, and block reconstruction.
     """
     # Extract the block
-    block = frame[i_start:i_start+block_size, j_start:j_start+block_size]
+    block = frame[i_start : i_start + block_size, j_start : j_start + block_size]
 
     # 1. Prediction (no offset, float)
     best_mode, block_residuals = find_best_mode_and_residuals_float(
@@ -344,10 +500,20 @@ def compress_block_prediction_dct_and_quant(
 
     # 5. Inverse prediction reconstruction
     reconstructed_block = np.zeros_like(residual_block_recon, dtype=np.float32)
-    _decode_block_float(residual_block_recon, reconstructed_block, 0, 0, block_size, block_size, mode_flag, True)
+    _decode_block_float(
+        residual_block_recon,
+        reconstructed_block,
+        0,
+        0,
+        block_size,
+        block_size,
+        mode_flag,
+        True,
+    )
 
     # Returns the quantized DCT residual, the reconstructed block, and metadata
     return quantized_dct_residual, reconstructed_block, mode_flag, min_val, step
+
 
 @njit
 def decompress_block_prediction_dct_and_quant(
@@ -356,7 +522,7 @@ def decompress_block_prediction_dct_and_quant(
     min_val: float,
     step: float,
     cosines: np.ndarray,
-    block_size: int
+    block_size: int,
 ) -> np.ndarray:
     """
     Dequantizes, applies IDCT, and reconstructs the original block using prediction.
@@ -369,5 +535,14 @@ def decompress_block_prediction_dct_and_quant(
 
     # 3. Inverse prediction reconstruction
     reconstructed_block = np.zeros_like(residual_block, dtype=np.float32)
-    _decode_block_float(residual_block, reconstructed_block, 0, 0, block_size, block_size, mode_flag, True)
+    _decode_block_float(
+        residual_block,
+        reconstructed_block,
+        0,
+        0,
+        block_size,
+        block_size,
+        mode_flag,
+        True,
+    )
     return reconstructed_block
